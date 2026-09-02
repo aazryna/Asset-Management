@@ -45,20 +45,27 @@
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import authService from '../services/authService';
+import { useAuthStore } from '../stores/auth';
 
 const email = ref('');
 const password = ref('');
 const errorMessage = ref('');
 const router = useRouter();
+const authStore = useAuthStore();
 
 const handleLogin = async () => {
     errorMessage.value = '';
     try {
-        await authService.login({
+        const res = await authService.login({
             email: email.value,
             password: password.value
         });
-        router.push('/tickets');
+
+        const userData = res.user || res.User || res;
+
+        authStore.setUser(userData);
+
+        router.push('/');
     } catch (error) {
         errorMessage.value = error.message || 'Invalid email or password.';
     }

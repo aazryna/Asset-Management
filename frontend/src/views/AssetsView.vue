@@ -2,6 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import * as XLSX from 'xlsx'
 import { assetService } from '../services/assetService'
+import { ticketService } from '../services/ticketService'
+import MaintenanceModal from '../components/MaintenanceModal.vue'
 
 // State management
 const assets = ref([])
@@ -13,8 +15,10 @@ const openMenuId = ref(null)
 // Modal states
 const showModal = ref(false)
 const showEditModal = ref(false)
+const showMaintenanceModal = ref(false)
 const submitting = ref(false)
 const updating = ref(false)
+const submittingMaintenance = ref(false)
 
 //form for add new asset
 const newAsset = ref({
@@ -31,6 +35,13 @@ const editingAsset = ref({
     category: '',
     serialNumber: '',
     status: 'Available'
+})
+
+const selectedAssetForTicket = ref(null)
+const maintenanceForm = ref({
+    subject: '',
+    description: '',
+    priority: 'Medium'
 })
 
 // Toggle Dropdown Menu
@@ -118,6 +129,36 @@ const removeAsset = async (id) => {
         await fetchAssets()
     } catch (err) {
         alert('Error: ' + err.message)
+    }
+}
+
+const openMaintenanceModal = (asset) => {
+    selectedAssetForTicket.value = asset
+    maintenanceForm.value = {
+        subject: `Maintenance Request: ${asset.name} (${asset.serialNumber})`,
+        description: '',
+        priority: 'Medium'
+    }
+    showMaintenanceModal.value = true
+}
+
+// Send maintenance ticket data to the backend
+const submitMaintenanceRequest = async (formData) => {
+    submittingMaintenance.value = true
+    try {
+        await ticketService.createTicket({
+            subject: formData.subject,
+            description: formData.description,
+            priority: formData.priority,
+            assetId: selectedAssetForTicket.value.id,
+            status: 'Open'
+        })
+        showMaintenanceModal.value = false
+        alert('Maintenance request submitted successfully! You can track it in the Tickets page.')
+    } catch (err) {
+        alert('Error: ' + err.message)
+    } finally {
+        submittingMaintenance.value = false
     }
 }
 
@@ -337,18 +378,25 @@ onMounted(() => {
                                     {{ asset.status }}
                                 </span>
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
-                                <button @click="toggleMenu(asset.id)"
-                                    class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 p-2 rounded-md transition inline-flex items-center justify-center">
-                                    <span>⋮</span>
+                            <td
+                                class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative flex items-center justify-end gap-2">
+                                <button @click="openMaintenanceModal(asset)" title="Request Maintenance"
+                                    class="text-orange-600 dark:text-orange-400 hover:text-orange-800 bg-orange-50 dark:bg-orange-900/30 hover:bg-orange-100 px-3 py-1.5 rounded-md text-xs font-medium transition inline-flex items-center gap-1">
+                                    🔧 Report Issue
                                 </button>
+                                <div class="relative">
+                                    <button @click="toggleMenu(asset.id)"
+                                        class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 p-2 rounded-md transition inline-flex items-center justify-center">
+                                        <span>⋮</span>
+                                    </button>
 
-                                <div v-if="openMenuId === asset.id"
-                                    class="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
-                                    <button @click.stop="openEditModal(asset); openMenuId = null"
-                                        class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 block">Edit</button>
-                                    <button @click.stop="removeAsset(asset.id); openMenuId = null"
-                                        class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 block">Delete</button>
+                                    <div v-if="openMenuId === asset.id"
+                                        class="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
+                                        <button @click.stop="openEditModal(asset); openMenuId = null"
+                                            class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 block">Edit</button>
+                                        <button @click.stop="removeAsset(asset.id); openMenuId = null"
+                                            class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 block">Delete</button>
+                                    </div>
                                 </div>
                             </td>
                         </tr>
@@ -467,6 +515,10 @@ onMounted(() => {
                     </form>
                 </div>
             </div>
+
+            <MaintenanceModal v-model="showMaintenanceModal" :asset="selectedAssetForTicket"
+                :submitting="submittingMaintenance" @submit="submitMaintenanceRequest" />
+
 
         </div>
     </div>

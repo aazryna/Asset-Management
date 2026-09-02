@@ -194,3 +194,6 @@ C:\Users\user\AssetManagementApi\obj\Debug\net10.0\refint\AssetManagementApi.dll
 C:\Users\user\AssetManagementApi\obj\Debug\net10.0\AssetManagementApi.pdb
 C:\Users\user\AssetManagementApi\obj\Debug\net10.0\AssetManagementApi.genruntimeconfig.cache
 C:\Users\user\AssetManagementApi\obj\Debug\net10.0\ref\AssetManagementApi.dll
+C:\Users\user\AssetManagementApi\obj\Debug\net10.0\AssetManagementApi.sourcelink.json
+C:\Users\user\AssetManagementApi\bin\Debug\net10.0\package-lock.json
+C:\Users\user\AssetManagementApi\bin\Debug\net10.0\package.json

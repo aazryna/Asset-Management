@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ticketService } from '../services/ticketService'
 import { assetService } from '../services/assetService'
+import { useAuthStore } from '../stores/auth'
 
 // State management
 const tickets = ref([])
@@ -11,6 +12,7 @@ const error = ref(null)
 const searchQuery = ref('')
 const statusFilter = ref('')
 const openMenuId = ref(null)
+const authStore = useAuthStore()
 
 // Modal state
 const showModal = ref(false)
@@ -101,10 +103,7 @@ onMounted(() => {
                     <p class="text-gray-600 dark:text-gray-400">Track hardware issues, repair requests, and support
                         status.</p>
                 </div>
-                <button @click="showModal = true"
-                    class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition">
-                    + Submit New Ticket
-                </button>
+
             </header>
 
             <!-- Search Bar & Status Filter -->
@@ -209,59 +208,7 @@ onMounted(() => {
                 </table>
             </div>
 
-            <!-- Add Ticket Modal -->
-            <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div
-                    class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full shadow-xl border border-gray-200 dark:border-gray-700">
-                    <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4">Submit IT Support Ticket</h3>
-                    <form @submit.prevent="createTicket" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject /
-                                Issue</label>
-                            <input v-model="newTicket.subject" type="text" required
-                                placeholder="e.g. Laptop screen flickering"
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none placeholder-gray-400 dark:placeholder-gray-500" />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Related Asset
-                                (Optional)</label>
-                            <select v-model="newTicket.assetId"
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none">
-                                <option value="">-- General Issue (No Asset) --</option>
-                                <option v-for="asset in assets" :key="asset.id" :value="asset.id">
-                                    {{ asset.name || asset.AssetName }} (ID: {{ asset.id }})
-                                </option>
-                            </select>
-                        </div>
-                        <div>
-                            <label
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Priority</label>
-                            <select v-model="newTicket.priority"
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none">
-                                <option value="Low">Low</option>
-                                <option value="Medium">Medium</option>
-                                <option value="High">High</option>
-                                <option value="Urgent">Urgent</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-                            <textarea v-model="newTicket.description" rows="3" required
-                                placeholder="Describe the problem in detail..."
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none placeholder-gray-400 dark:placeholder-gray-500"></textarea>
-                        </div>
-                        <div class="flex justify-end space-x-3 mt-6">
-                            <button type="button" @click="showModal = false"
-                                class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition font-medium">Cancel</button>
-                            <button type="submit" :disabled="submitting"
-                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition font-medium">
-                                {{ submitting ? 'Submitting...' : 'Submit Ticket' }}
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
+
         </div>
     </div>
 </template>

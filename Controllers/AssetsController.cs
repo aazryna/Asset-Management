@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Mvc;
 using AssetManagementApi.Data;
 using AssetManagementApi.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization; 
+using System.Security.Claims; 
 
 namespace AssetManagementApi.Controllers
 {
@@ -21,7 +23,9 @@ namespace AssetManagementApi.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Asset>>> GetAssets([FromQuery] string? search)
         {
-            var query = _context.Assets.AsQueryable();
+            var query = _context.Assets
+                .Include(a => a.User) 
+                .AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(search))
             {
@@ -29,13 +33,15 @@ namespace AssetManagementApi.Controllers
                 a.Category.Contains(search) || a.serialNumber.Contains(search));
             }
 
-            return await query.ToListAsync();   
+            return await query.OrderByDescending(a => a.Id).ToListAsync(); 
         }
 
         [HttpGet("{id}")]
         public async Task<ActionResult<Asset>> GetAsset(int id)
         {
-            var asset = await _context.Assets.FindAsync(id);
+            var asset = await _context.Assets
+                .Include(a => a.User)
+                .FirstOrDefaultAsync(a => a.Id == id);
 
             if (asset == null)
             {
@@ -47,15 +53,30 @@ namespace AssetManagementApi.Controllers
 
         // POST: api/Assets (Add new Asset)[cite: 1]
         [HttpPost]
+        [Authorize]
         public async Task<ActionResult<Asset>> CreateAsset(Asset asset)
         {
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (int.TryParse(userIdString, out int userId))
+            {
+                asset.UserId = userId; 
+            }
+            else
+            {
+                return Unauthorized(new { message = "Invalid token or user ID not found." });
+            }
+
             _context.Assets.Add(asset);
             await _context.SaveChangesAsync();
+
+            await _context.Entry(asset).Reference(a => a.User).LoadAsync();
 
             return CreatedAtAction(nameof(GetAsset), new { id = asset.Id }, asset); 
         }
 
         [HttpPut("{id}")]
+        [Authorize]
         public async Task<IActionResult> UpdateAsset(int id, Asset asset)
         {
             if (id != asset.Id)
@@ -86,6 +107,7 @@ namespace AssetManagementApi.Controllers
 
         //DELETE: api/Assets5 (Delete asset)[cite: 1]
         [HttpDelete("{id}")]
+        [Authorize]
         public async Task<IActionResult> DeleteAsset(int id)
         {
             var asset = await _context.Assets.FindAsync(id);

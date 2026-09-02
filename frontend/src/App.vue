@@ -1,17 +1,19 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
+import { useAuthStore } from './stores/auth';
 import authService from './services/authService';
 import sophicLogo from './assets/sophic.png';
 
 const route = useRoute();
 const router = useRouter();
+const authStore = useAuthStore();
 
 const hideNavbar = computed(() => {
   return ['/login', '/register'].includes(route.path);
 });
 
-const currentUser = authService.getCurrentUser();
+const currentUser = computed(() => authStore.user);
 
 // State to control dropdown visibility
 const isDropdownOpen = ref(false);
@@ -57,32 +59,28 @@ onUnmounted(() => {
 });
 
 const handleLogout = () => {
-  authService.logout();
+  authStore.logout();
   router.push('/login');
 };
 </script>
 
 <template>
-  <!-- 1. UBAH SINI: Tambah 'dark:bg-gray-900 text-gray-900 dark:text-gray-100' pada kontena utama -->
   <div
     class="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col transition-colors duration-200">
 
-    <!-- Navbar -->
-    <!-- 2. UBAH SINI: Tambah 'dark:bg-gray-800' dan 'dark:border-gray-700' -->
+
     <nav v-if="!hideNavbar"
       class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm relative z-50 transition-colors duration-200">
       <div class="max-w-6xl mx-auto px-8 py-4 flex justify-between items-center">
         <!-- Logo Image -->
         <div class="flex items-center">
           <router-link to="/">
-            <!-- 3. UBAH SINI: Guna ':src="sophicLogo"' dan tambah 'dark:border-gray-700' -->
             <img :src="sophicLogo" alt="Logo"
               class="w-12 h-12 rounded-full object-cover border border-gray-200 dark:border-gray-700 shadow-sm" />
           </router-link>
         </div>
 
-        <!-- Center Navigation Links -->
-        <!-- 4. UBAH SINI: Tambah kelas 'dark:' untuk link navbar -->
+
         <div class="flex space-x-6">
           <RouterLink to="/"
             class="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium transition"
@@ -99,16 +97,14 @@ const handleLogout = () => {
             active-class="text-blue-600 dark:text-blue-400 font-bold">
             Tickets
           </RouterLink>
-          <RouterLink to="/activity-log"
+          <RouterLink v-if="authStore.isAdmin" to="/activity-log"
             class="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium transition"
             active-class="text-blue-600 dark:text-blue-400 font-bold">
             Activity Log
           </RouterLink>
         </div>
 
-        <!-- Right Section: Profile Dropdown -->
         <div class="relative" id="profile-menu" v-if="currentUser">
-          <!-- 5. UBAH SINI: Tambah gaya dark mode untuk butang profile -->
           <button @click="toggleDropdown"
             class="flex items-center space-x-3 focus:outline-none bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-600 transition">
             <div class="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
@@ -126,7 +122,6 @@ const handleLogout = () => {
           </button>
 
           <!-- Dropdown Menu Box -->
-          <!-- 7. UBAH SINI: Tambah 'dark:bg-gray-800 dark:border-gray-700' -->
           <div v-if="isDropdownOpen"
             class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 z-50">
             <div class="px-4 py-2 border-b border-gray-100 dark:border-gray-700 md:hidden">
@@ -154,7 +149,6 @@ const handleLogout = () => {
             </button>
 
             <!-- Sign Out Button -->
-            <!-- 8. UBAH SINI: Tambah 'dark:text-red-400' & 'dark:hover:bg-gray-700' -->
             <button @click="handleLogout"
               class="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 flex items-center space-x-2 transition">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

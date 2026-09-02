@@ -1,5 +1,14 @@
 const API_BASE_URL = "http://localhost:5090/api/assets";
 
+// Helper function to retrieve the token from localStorage (adjust the name 'token' if a different name is used)
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
 export const assetService = {
   async getAssets() {
     const response = await fetch(API_BASE_URL);
@@ -10,7 +19,7 @@ export const assetService = {
   async createAsset(assetData) {
     const response = await fetch(API_BASE_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify(assetData),
     });
     if (!response.ok) throw new Error("Failed to add new asset.");
@@ -20,7 +29,7 @@ export const assetService = {
   async updateAsset(id, assetData) {
     const response = await fetch(`${API_BASE_URL}/${id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify(assetData),
     });
     if (!response.ok) throw new Error("Failed to update asset.");
@@ -33,6 +42,7 @@ export const assetService = {
   async deleteAsset(id) {
     const response = await fetch(`${API_BASE_URL}/${id}`, {
       method: "DELETE",
+      headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error("Failed to delete asset.");
     return true;

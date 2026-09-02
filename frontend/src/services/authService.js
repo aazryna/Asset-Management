@@ -6,11 +6,16 @@ export default {
   async login(credentials) {
     try {
       const response = await axios.post(`${API_URL}/login`, credentials);
-      if (response.data.token) {
-        localStorage.setItem("token", response.data.token);
-        localStorage.setItem("user", JSON.stringify(response.data.user));
+      const data = response.data;
+
+      const token = data.token || data.Token;
+      const user = data.user || data.User || data;
+
+      if (token) {
+        localStorage.setItem("token", token);
+        localStorage.setItem("user", JSON.stringify(user));
       }
-      return response.data;
+      return data;
     } catch (error) {
       throw (
         error.response?.data || {
@@ -27,7 +32,7 @@ export default {
 
   getCurrentUser() {
     const user = localStorage.getItem("user");
-    return user ? JSON.parse(user) : null;
+    return user && user !== "undefined" ? JSON.parse(user) : null;
   },
 
   getToken() {

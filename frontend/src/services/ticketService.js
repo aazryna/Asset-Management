@@ -11,6 +11,10 @@ export const ticketService = {
     const response = await axios.post(API_URL, ticketData);
     return response.data;
   },
+  async updateTicket(id, ticketData) {
+    const response = await axios.put(`${API_URL}/${id}`, ticketData);
+    return response.data;
+  },
   async deleteTicket(id) {
     const response = await axios.delete(`${API_URL}/${id}`);
     return response.data;

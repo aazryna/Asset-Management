@@ -30,10 +30,10 @@ namespace AssetManagementApi.Controllers
         [HttpPost]
         public async Task<ActionResult<Ticket>> CreateTicket(Ticket ticket)
         {
+            ticket.Status = "Maintenance";
             ticket.CreatedAt = DateTime.UtcNow;
             _context.Tickets.Add(ticket);
 
-            // Tambah Activity Log
             var log = new ActivityLog
             {
                 Action = "CREATE_TICKET",
@@ -45,6 +45,45 @@ namespace AssetManagementApi.Controllers
             await _context.SaveChangesAsync();
 
             return CreatedAtAction(nameof(GetTickets), new { id = ticket.Id }, ticket);
+        }
+
+        // PUT: api/tickets/{id}
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutTicket(int id, Ticket ticket)
+        {
+            if (id != ticket.Id)
+            {
+                return BadRequest();
+            }
+
+            _context.Entry(ticket).State = EntityState.Modified;
+
+            try
+            {
+                // activity log update ticket
+                var log = new ActivityLog
+                {
+                    Action = "UPDATE_TICKET",
+                    Description = $"Ticket ID {id} ({ticket.Subject}) status updated to {ticket.Status}.",
+                    Timestamp = DateTime.UtcNow
+                };
+                _context.ActivityLogs.Add(log);
+
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!_context.Tickets.Any(e => e.Id == id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            return NoContent();
         }
 
         // DELETE: api/tickets/{id}

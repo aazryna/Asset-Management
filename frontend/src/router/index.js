@@ -7,6 +7,7 @@ import LoginView from "../views/LoginView.vue";
 import RegisterView from "../views/RegisterView.vue";
 import authService from "../services/authService";
 import { useAuthStore } from "../stores/auth";
+import { ROLES } from "../constants/roles";
 
 const routes = [
   {
@@ -59,9 +60,11 @@ router.beforeEach((to, from, next) => {
     return next({ name: "Login" });
   }
 
-  if (to.meta.requiresAdmin && !authStore.isAdmin) {
-    // Kalau cuba menyelit masuk tapi bukan admin, campak balik ke Assets/Dashboard
-    return next({ name: "Assets" });
+  if (to.meta.requiresAdmin) {
+    const userRole = authStore.user?.role;
+    if (userRole !== ROLES.ADMIN) {
+      return next({ name: "Tickets" });
+    }
   }
 
   if ((to.name === "Login" || to.name === "Register") && isAuthenticated) {

@@ -37,8 +37,8 @@
                     <label class="block text-sm font-medium text-gray-700 mb-2">Role</label>
                     <select v-model="role"
                         class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="Normal User">Normal User</option>
-                        <option value="Admin">Admin</option>
+                        <option :value="ROLES.STAFF">Staff</option>
+                        <option :value="ROLES.ADMIN">Admin</option>
                     </select>
                 </div>
 
@@ -61,11 +61,12 @@
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from 'axios';
+import { ROLES } from '../constants/roles';
 
 const name = ref('');
 const email = ref('');
 const password = ref('');
-const role = ref('Normal User');
+const role = ref(ROLES.STAFF);
 const errorMessage = ref('');
 const successMessage = ref('');
 const router = useRouter();

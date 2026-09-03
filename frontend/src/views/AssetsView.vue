@@ -1,8 +1,9 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 import * as XLSX from 'xlsx'
 import { assetService } from '../services/assetService'
 import { ticketService } from '../services/ticketService'
+import { userService } from '../services/userService'
 import MaintenanceModal from '../components/MaintenanceModal.vue'
 
 // State management
@@ -11,6 +12,24 @@ const loading = ref(true)
 const error = ref(null)
 const searchQuery = ref('')
 const openMenuId = ref(null)
+
+const usersList = ref([])
+
+const successMessage = ref('')
+const errorMessage = ref('')
+
+const showSuccess = (msg) => {
+    successMessage.value = msg
+    errorMessage.value = ''
+    setTimeout(() => {
+        if (successMessage.value === msg) successMessage.value = ''
+    }, 5000)
+}
+
+const showError = (msg) => {
+    errorMessage.value = msg
+    successMessage.value = ''
+}
 
 // Modal states
 const showModal = ref(false)
@@ -25,7 +44,8 @@ const newAsset = ref({
     name: '',
     category: '',
     serialNumber: '',
-    status: 'Available'
+    status: 'Available',
+    userId: ''
 })
 
 //state for edit modal
@@ -34,8 +54,13 @@ const editingAsset = ref({
     name: '',
     category: '',
     serialNumber: '',
-    status: 'Available'
+    status: 'Available',
+    userId: null,
+    userName: ''
 })
+
+const currentUser = ref(JSON.parse(localStorage.getItem('user')) || {})
+const isAdmin = computed(() => currentUser.value.role === 'Admin')
 
 const selectedAssetForTicket = ref(null)
 const maintenanceForm = ref({
@@ -62,6 +87,14 @@ const fetchAssets = async () => {
     }
 }
 
+const fetchUsersList = async () => {
+    try {
+        usersList.value = await userService.getUsers()
+    } catch (err) {
+        console.error('Failed to retrieve staff list:', err)
+    }
+}
+
 // Computed properties for Dashboard Metrics 
 const totalAssets = computed(() => assets.value.length)
 const assignedCount = computed(() =>
@@ -74,14 +107,40 @@ const maintenanceCount = computed(() =>
     assets.value.filter(a => a.status === 'Maintenance').length
 )
 
-// Computed property for real-time searching
+const myAssetsCount = computed(() => {
+    const userId = currentUser.value.id
+    const userName = (currentUser.value.name || currentUser.value.username || '').toLowerCase()
+
+    return assets.value.filter(a => {
+        const ownerId = a.userId ?? a.UserId ?? a.user?.id ?? a.User?.id
+        const ownerName = (a.user?.name ?? a.user?.Name ?? a.user?.username ?? a.user?.Username ?? a.User?.name ?? '').toLowerCase()
+        return (userId && ownerId === userId) || (userName && ownerName === userName)
+    }).length
+})
+
+const myTicketsCount = computed(() => {
+    return assets.value.filter(a => {
+        const userId = currentUser.value.id
+        const ownerId = a.userId ?? a.UserId ?? a.user?.id ?? a.User?.id
+        return ownerId === userId && a.status === 'Maintenance'
+    }).length
+})
+
 const filteredAssets = computed(() => {
     return assets.value.filter(asset => {
         const query = searchQuery.value.toLowerCase()
+
+        const ownerName = (
+            asset.user?.name ?? asset.user?.Name ?? asset.user?.username ?? asset.user?.Username ??
+            asset.User?.name ?? asset.User?.Name ?? asset.User?.username ?? asset.User?.Username ??
+            ''
+        ).toLowerCase()
+
         return (
             asset.name.toLowerCase().includes(query) ||
             asset.category.toLowerCase().includes(query) ||
-            asset.serialNumber.toLowerCase().includes(query)
+            asset.serialNumber.toLowerCase().includes(query) ||
+            ownerName.includes(query)
         )
     })
 })
@@ -90,6 +149,7 @@ const filteredAssets = computed(() => {
 const createAsset = async () => {
     submitting.value = true
     try {
+        console.log("DATA YANG HENDAK DIHANTAR:", newAsset.value)
         await assetService.createAsset(newAsset.value)
         newAsset.value = { name: '', category: '', serialNumber: '', status: 'Available' }
         showModal.value = false
@@ -113,9 +173,10 @@ const updateAsset = async () => {
     try {
         await assetService.updateAsset(editingAsset.value.id, editingAsset.value)
         showEditModal.value = false
+        showSuccess('Asset successfully updated!')
         await fetchAssets()
     } catch (err) {
-        alert('Error: ' + err.message)
+        showError('Error: ' + err.message)
     } finally {
         updating.value = false
     }
@@ -126,9 +187,10 @@ const removeAsset = async (id) => {
     if (!confirm('Are you sure you want to delete this asset?')) return
     try {
         await assetService.deleteAsset(id)
+        showSuccess('Asset successfully deleted!')
         await fetchAssets()
     } catch (err) {
-        alert('Error: ' + err.message)
+        showError('Error: ' + err.message)
     }
 }
 
@@ -153,10 +215,18 @@ const submitMaintenanceRequest = async (formData) => {
             assetId: selectedAssetForTicket.value.id,
             status: 'Open'
         })
+        const targetAsset = selectedAssetForTicket.value
+        await assetService.updateAsset(targetAsset.id, {
+            ...targetAsset,
+            status: 'Maintenance'
+        })
+
         showMaintenanceModal.value = false
-        alert('Maintenance request submitted successfully! You can track it in the Tickets page.')
+        showSuccess('Maintenance request submitted successfully! You can track it in the Tickets page.')
+
+        await fetchAssets()
     } catch (err) {
-        alert('Error: ' + err.message)
+        showError('Error: ' + err.message)
     } finally {
         submittingMaintenance.value = false
     }
@@ -165,7 +235,7 @@ const submitMaintenanceRequest = async (formData) => {
 // Excel Export Utility
 const exportToExcel = () => {
     if (assets.value.length === 0) {
-        alert('No asset data available to export.')
+        showError('No asset data available to export.')
         return
     }
     const dataToExport = assets.value.map(asset => ({
@@ -200,7 +270,7 @@ const handleFileUpload = async (event) => {
             const jsonData = XLSX.utils.sheet_to_json(worksheet)
 
             if (jsonData.length === 0) {
-                alert('The Excel file is empty.')
+                showError('The Excel file is empty.')
                 return
             }
 
@@ -224,7 +294,7 @@ const handleFileUpload = async (event) => {
             alert('Successfully imported all assets from Excel!')
             await fetchAssets() // Refresh the asset list after import
         } catch (err) {
-            alert('Ralat semasa import Excel: ' + err.message)
+            showError('Ralat semasa import Excel: ' + err.message)
         } finally {
             loading.value = false
             // Reset the file input so the same file can be selected again if needed
@@ -234,8 +304,19 @@ const handleFileUpload = async (event) => {
     reader.readAsArrayBuffer(file)
 }
 
+watch(() => editingAsset.value.status, (newStatus, oldStatus) => {
+    if (showEditModal.value && newStatus === 'Maintenance' && oldStatus !== 'Maintenance') {
+        showEditModal.value = false
+
+        selectedAssetForTicket.value = { ...editingAsset.value }
+
+        showMaintenanceModal.value = true
+    }
+})
+
 onMounted(() => {
     fetchAssets()
+    fetchUsersList()
 })
 </script>
 
@@ -246,9 +327,10 @@ onMounted(() => {
             <header class="mb-8 flex justify-between items-center">
                 <div>
                     <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-100">Asset Management System</h1>
-                    <p class="text-gray-600 dark:text-gray-400">Company asset inventory list from database.</p>
+                    <p class="text-gray-600 dark:text-gray-400">
+                        {{ isAdmin ? 'Company asset inventory list.' : 'My personal assigned assets.' }}</p>
                 </div>
-                <button @click="showModal = true"
+                <button v-if="isAdmin" @click="showModal = true"
                     class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition">
                     + Add New Asset
                 </button>
@@ -256,13 +338,16 @@ onMounted(() => {
 
             <!-- Dashboard Metrics Section -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <!-- Total Assets Card -->
+
                 <div
                     class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 flex items-center justify-between transition-colors duration-200">
                     <div>
-                        <p class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total
-                            Assets</p>
-                        <h3 class="text-3xl font-bold text-gray-800 dark:text-gray-100 mt-1">{{ totalAssets }}</h3>
+                        <p class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            {{ isAdmin ? 'Total Assets' : 'My Assigned Assets' }}
+                        </p>
+                        <h3 class="text-3xl font-bold text-gray-800 dark:text-gray-100 mt-1">
+                            {{ isAdmin ? totalAssets : myAssetsCount }}
+                        </h3>
                     </div>
                     <div
                         class="p-3 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-full text-xl">
@@ -270,19 +355,17 @@ onMounted(() => {
                     </div>
                 </div>
 
-                <!-- Assigned vs Unassigned Card -->
-                <div
+                <!-- Kotak 2: Assigned vs Unassigned (HANYA NAMPAK UNTUK ADMIN - Staff akan di-hide) -->
+                <div v-if="isAdmin"
                     class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 transition-colors duration-200">
                     <p class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
                         Assigned vs Unassigned
                     </p>
                     <div class="flex justify-between items-center text-sm">
                         <span class="text-gray-600 dark:text-gray-300">In Use: <strong
-                                class="text-gray-800 dark:text-gray-100">{{ assignedCount
-                                }}</strong></span>
+                                class="text-gray-800 dark:text-gray-100">{{ assignedCount }}</strong></span>
                         <span class="text-gray-600 dark:text-gray-300">Available: <strong
-                                class="text-gray-800 dark:text-gray-100">{{ unassignedCount
-                                }}</strong></span>
+                                class="text-gray-800 dark:text-gray-100">{{ unassignedCount }}</strong></span>
                     </div>
                     <!-- Visual progress bar -->
                     <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-3 overflow-hidden flex">
@@ -293,13 +376,15 @@ onMounted(() => {
                     </div>
                 </div>
 
-                <!-- Maintenance Card -->
+                <!-- Kotak 3: Maintenance Card (Tukar teks tajuk & value je) -->
                 <div
                     class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 flex items-center justify-between transition-colors duration-200">
                     <div>
-                        <p class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Needs
-                            Maintenance</p>
-                        <h3 class="text-3xl font-bold text-orange-600 dark:text-orange-400 mt-1">{{ maintenanceCount }}
+                        <p class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            {{ isAdmin ? 'Needs Maintenance' : 'My Active Tickets' }}
+                        </p>
+                        <h3 class="text-3xl font-bold text-orange-600 dark:text-orange-400 mt-1">
+                            {{ isAdmin ? maintenanceCount : myTicketsCount }}
                         </h3>
                     </div>
                     <div
@@ -318,7 +403,7 @@ onMounted(() => {
                 </div>
 
                 <!-- Import Excel Button on the Right -->
-                <div>
+                <div v-if="isAdmin">
                     <input type="file" ref="fileInput" @change="handleFileUpload" accept=".xlsx, .xls" class="hidden" />
                     <button @click="$refs.fileInput.click()"
                         class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition inline-flex items-center gap-2">
@@ -354,6 +439,9 @@ onMounted(() => {
                                 class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                                 Status</th>
                             <th
+                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                Assigned User</th>
+                            <th
                                 class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                                 Actions</th>
                         </tr>
@@ -363,7 +451,7 @@ onMounted(() => {
                         <tr v-for="asset in filteredAssets" :key="asset.id"
                             class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-150">
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{ asset.id
-                                }}</td>
+                            }}</td>
                             <td
                                 class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-800 dark:text-gray-100">
                                 {{ asset.name }}
@@ -378,30 +466,53 @@ onMounted(() => {
                                     {{ asset.status }}
                                 </span>
                             </td>
-                            <td
-                                class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative flex items-center justify-end gap-2">
-                                <button @click="openMaintenanceModal(asset)" title="Request Maintenance"
-                                    class="text-orange-600 dark:text-orange-400 hover:text-orange-800 bg-orange-50 dark:bg-orange-900/30 hover:bg-orange-100 px-3 py-1.5 rounded-md text-xs font-medium transition inline-flex items-center gap-1">
-                                    🔧 Report Issue
-                                </button>
-                                <div class="relative">
-                                    <button @click="toggleMenu(asset.id)"
-                                        class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 p-2 rounded-md transition inline-flex items-center justify-center">
-                                        <span>⋮</span>
+
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                                <span v-if="asset.user || asset.User || asset.userId || asset.UserId">
+                                    {{
+                                        asset.user?.name ?? asset.user?.Name ?? asset.user?.username ?? asset.user?.Username
+                                        ??
+                                        asset.User?.name ?? asset.User?.Name ?? asset.User?.username ?? asset.User?.Username
+                                        ??
+                                        'User #' + (asset.userId ?? asset.UserId)
+                                    }}
+                                </span>
+                                <span v-else class="text-gray-400 italic">
+                                    Unassigned
+                                </span>
+                            </td>
+
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
+                                <div class="flex items-center justify-end gap-2">
+                                    <button @click="openMaintenanceModal(asset)" title="Report Issue to IT"
+                                        class="text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30 px-3 py-1.5 rounded-md text-xs font-medium transition inline-flex items-center gap-1 bg-orange-50/50 dark:bg-orange-950/30">
+                                        🔧 Report Issue
                                     </button>
 
-                                    <div v-if="openMenuId === asset.id"
-                                        class="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
-                                        <button @click.stop="openEditModal(asset); openMenuId = null"
-                                            class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 block">Edit</button>
-                                        <button @click.stop="removeAsset(asset.id); openMenuId = null"
-                                            class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 block">Delete</button>
+                                    <div v-if="isAdmin" class="relative">
+                                        <button @click="toggleMenu(asset.id)"
+                                            class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 p-2 rounded-md transition inline-flex items-center justify-center">
+                                            <span>⋮</span>
+                                        </button>
+
+                                        <div v-if="openMenuId === asset.id"
+                                            class="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
+                                            <button @click.stop="openEditModal(asset); openMenuId = null"
+                                                class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 block text-left">
+                                                ✏️ Edit Asset
+                                            </button>
+                                            <button @click.stop="removeAsset(asset.id); openMenuId = null"
+                                                class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 block text-left">
+                                                🗑️ Delete
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </td>
                         </tr>
                         <tr v-if="filteredAssets.length === 0">
-                            <td colspan="6" class="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">No
+                            <!-- ✅ 2. TUKAR COLSPAN JADI 7 -->
+                            <td colspan="7" class="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">No
                                 asset records found.
                             </td>
                         </tr>
@@ -439,6 +550,18 @@ onMounted(() => {
                             <input v-model="newAsset.serialNumber" type="text" required
                                 class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 placeholder="e.g. SN-12345" />
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Assign to
+                                Staff (Optional)</label>
+                            <select v-model="newAsset.userId"
+                                class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">-- Unassigned (Available) --</option>
+                                <option v-for="user in usersList" :key="user.id" :value="user.id">
+                                    {{ user.name || user.username }} ({{ user.role }})
+                                </option>
+                            </select>
                         </div>
 
                         <div>

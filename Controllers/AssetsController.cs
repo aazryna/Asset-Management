@@ -21,16 +21,37 @@ namespace AssetManagementApi.Controllers
 
         // GET: api/Assets (List all assets & basic search feature)[cite: 1]
         [HttpGet]
+        [Authorize]
         public async Task<ActionResult<IEnumerable<Asset>>> GetAssets([FromQuery] string? search)
         {
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+
             var query = _context.Assets
                 .Include(a => a.User) 
                 .AsQueryable();
 
+            if (userRole != "Admin")
+            {
+                if (int.TryParse(userIdString, out int currentUserId))
+            {
+                query = query.Where(a => a.UserId == currentUserId);
+            }
+                else
+            {
+                return Unauthorized(new { message = "Invalid user token." });
+            }
+        }
+
             if (!string.IsNullOrWhiteSpace(search))
             {
-                query = query.Where(a => a.Name.Contains(search) || 
-                a.Category.Contains(search) || a.serialNumber.Contains(search));
+                var lowerSearch = search.ToLower();
+                query = query.Where(a => 
+                    a.Name.ToLower().Contains(lowerSearch) || 
+                    a.Category.ToLower().Contains(lowerSearch) || 
+                    a.serialNumber.ToLower().Contains(lowerSearch) ||
+                    (a.User != null && a.User.Name.ToLower().Contains(lowerSearch))
+                );
             }
 
             return await query.OrderByDescending(a => a.Id).ToListAsync(); 
@@ -56,15 +77,27 @@ namespace AssetManagementApi.Controllers
         [Authorize]
         public async Task<ActionResult<Asset>> CreateAsset(Asset asset)
         {
-            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userRole = User.FindFirst(ClaimTypes.Role)?.Value 
+                        ?? User.FindFirst("role")?.Value;
 
-            if (int.TryParse(userIdString, out int userId))
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                            ?? User.FindFirst("sub")?.Value;
+
+            if (!int.TryParse(userIdString, out int currentUserId))
             {
-                asset.UserId = userId; 
+                return Unauthorized(new { message = "Invalid token or user ID not found." });
+            }
+
+            if (userRole == "Admin" || string.IsNullOrEmpty(userRole))
+            {
+                if (asset.UserId == null || asset.UserId == 0)
+                {
+                    asset.UserId = currentUserId;
+                }
             }
             else
             {
-                return Unauthorized(new { message = "Invalid token or user ID not found." });
+                asset.UserId = currentUserId;
             }
 
             _context.Assets.Add(asset);

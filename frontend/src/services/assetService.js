@@ -11,7 +11,10 @@ const getAuthHeaders = () => {
 
 export const assetService = {
   async getAssets() {
-    const response = await fetch(API_BASE_URL);
+    const response = await fetch(API_BASE_URL, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
     if (!response.ok) throw new Error("Failed to fetch data from server");
     return await response.json();
   },

@@ -3,6 +3,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using AssetManagementApi.Data;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,7 +41,10 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuer = true,
         ValidIssuer = builder.Configuration["Jwt:Issuer"] ?? "AssetManagementApi",
         ValidateAudience = true,
-        ValidAudience = builder.Configuration["Jwt:Audience"] ?? "AssetManagementClient"
+        ValidAudience = builder.Configuration["Jwt:Audience"] ?? "AssetManagementClient",
+
+        RoleClaimType = ClaimTypes.Role,
+        NameClaimType = ClaimTypes.NameIdentifier
     };
 });
 

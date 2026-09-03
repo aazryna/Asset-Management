@@ -14,6 +14,25 @@ const statusFilter = ref('')
 const openMenuId = ref(null)
 const authStore = useAuthStore()
 
+const successMessage = ref('')
+const errorMessage = ref('')
+
+const showSuccess = (msg) => {
+    successMessage.value = msg
+    errorMessage.value = ''
+    setTimeout(() => {
+        if (successMessage.value === msg) successMessage.value = ''
+    }, 5000)
+}
+
+const showError = (msg) => {
+    errorMessage.value = msg
+    successMessage.value = ''
+}
+
+const currentUser = ref(JSON.parse(localStorage.getItem('user')) || {})
+const isAdmin = computed(() => currentUser.value.role === 'Admin')
+
 // Modal state
 const showModal = ref(false)
 const submitting = ref(false)
@@ -24,7 +43,6 @@ const newTicket = ref({
     assetId: '',
     priority: 'Medium',
     description: '',
-    status: 'Open'
 })
 
 // Toggle Dropdown Menu
@@ -63,16 +81,30 @@ const filteredTickets = computed(() => {
     })
 })
 
+const updateTicketStatus = async (ticket, newStatus) => {
+    try {
+        await ticketService.updateTicket(ticket.id, {
+            ...ticket,
+            status: newStatus
+        })
+        showSuccess(`Ticket #${ticket.id} status updated to ${newStatus}!`)
+        await fetchData()
+    } catch (err) {
+        showError('Error updating status: ' + err.message)
+    }
+}
+
 // Create Ticket Action
 const createTicket = async () => {
     submitting.value = true
     try {
         await ticketService.createTicket(newTicket.value)
         showModal.value = false
-        newTicket.value = { subject: '', assetId: '', priority: 'Medium', description: '', status: 'Open' }
+        newTicket.value = { subject: '', assetId: '', priority: 'Medium', description: '' }
+        showSuccess('Ticket successfully created!')
         await fetchData()
     } catch (err) {
-        alert('Error: ' + err.message)
+        showError('Error: ' + err.message)
     } finally {
         submitting.value = false
     }
@@ -83,9 +115,10 @@ const removeTicket = async (id) => {
     if (!confirm('Are you sure you want to close/delete this ticket?')) return
     try {
         await ticketService.deleteTicket(id)
+        showSuccess('Ticket successfully deleted!')
         await fetchData()
     } catch (err) {
-        alert('Error: ' + err.message)
+        showError('Error: ' + err.message)
     }
 }
 
@@ -105,6 +138,26 @@ onMounted(() => {
                 </div>
 
             </header>
+
+            <div v-if="successMessage"
+                class="mb-6 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-300 px-4 py-3 rounded-lg shadow-sm flex items-center justify-between transition-all">
+                <div class="flex items-center gap-2">
+                    <span class="text-green-600 dark:text-green-400 font-bold">✓</span>
+                    <span class="text-sm font-medium">{{ successMessage }}</span>
+                </div>
+                <button @click="successMessage = ''"
+                    class="text-green-600 dark:text-green-400 hover:text-green-800 font-bold text-sm">✕</button>
+            </div>
+
+            <div v-if="errorMessage"
+                class="mb-6 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 px-4 py-3 rounded-lg shadow-sm flex items-center justify-between transition-all">
+                <div class="flex items-center gap-2">
+                    <span class="text-red-600 dark:text-red-400 font-bold">⚠️</span>
+                    <span class="text-sm font-medium">{{ errorMessage }}</span>
+                </div>
+                <button @click="errorMessage = ''"
+                    class="text-red-600 dark:text-red-400 hover:text-red-800 font-bold text-sm">✕</button>
+            </div>
 
             <!-- Search Bar & Status Filter -->
             <div class="mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -130,7 +183,7 @@ onMounted(() => {
 
             <!-- Tickets Table -->
             <div v-if="!loading && !error"
-                class="bg-white dark:bg-gray-800 shadow-md rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                class="bg-white dark:bg-gray-800 shadow-md rounded-lg border border-gray-200 dark:border-gray-700 overflow-visible">
                 <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                     <thead class="bg-gray-50 dark:bg-gray-700">
                         <tr>
@@ -193,8 +246,24 @@ onMounted(() => {
                                     <span>⋮</span>
                                 </button>
 
+                                <!-- KOD DAH TUKAR -->
                                 <div v-if="openMenuId === ticket.id"
-                                    class="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
+                                    class="absolute right-0 bottom-full mb-1 w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
+
+                                    <template v-if="isAdmin">
+                                        <button v-if="ticket.status !== 'In Progress'"
+                                            @click="updateTicketStatus(ticket, 'In Progress'); openMenuId = null"
+                                            class="w-full px-4 py-2 text-sm text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 block">
+                                            Mark as In Progress
+                                        </button>
+                                        <button v-if="ticket.status !== 'Resolved'"
+                                            @click="updateTicketStatus(ticket, 'Resolved'); openMenuId = null"
+                                            class="w-full px-4 py-2 text-sm text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 block">
+                                            Mark as Resolved
+                                        </button>
+                                        <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                                    </template>
+
                                     <button @click="removeTicket(ticket.id); openMenuId = null"
                                         class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 block">Delete</button>
                                 </div>

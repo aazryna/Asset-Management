@@ -16,6 +16,24 @@ const fetchLogs = async () => {
     }
 }
 
+const formatTimestamp = (timestamp) => {
+    if (!timestamp) return '-'
+    // Pastikan string UTC dibaca betul dengan tambah 'Z' jika tiada offset
+    const dateStr = timestamp.endsWith('Z') || timestamp.includes('+') ? timestamp : timestamp + 'Z'
+    const date = new Date(dateStr)
+
+    return new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kuala_Lumpur',
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+    }).format(date)
+}
+
 onMounted(() => {
     fetchLogs()
 })
@@ -74,7 +92,7 @@ onMounted(() => {
                             </td>
                             <td class="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{{ log.description }}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                                {{ new Date(log.timestamp).toLocaleString() }}
+                                {{ formatTimestamp(log.timestamp) }}
                             </td>
                         </tr>
                     </tbody>

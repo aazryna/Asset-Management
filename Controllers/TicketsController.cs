@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization; 
+using System.Security.Claims;
 using AssetManagementApi.Data;
 using AssetManagementApi.Models;
 
@@ -7,6 +9,7 @@ namespace AssetManagementApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class TicketsController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -20,32 +23,80 @@ namespace AssetManagementApi.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Ticket>>> GetTickets()
         {
-            return await _context.Tickets
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+
+            IQueryable<Ticket> query = _context.Tickets
                 .Include(t => t.Asset)
-                .OrderByDescending(t => t.CreatedAt)
-                .ToListAsync();
+                    .ThenInclude(a => a.User) 
+                .Include(t => t.User)
+                .Include(t => t.CreatedBy);
+
+            if (userRole != "Admin")
+        {
+                if (int.TryParse(userIdClaim, out int parsedUserId))
+            {
+                query = query.Where(t => t.UserId == parsedUserId);
+            }
+                else
+            {
+                return Unauthorized();
+            }
+        }
+
+            var tickets = await query.ToListAsync();
+            return Ok(tickets);
         }
 
         // POST: api/tickets
         [HttpPost]
-        public async Task<ActionResult<Ticket>> CreateTicket(Ticket ticket)
+        public async Task<ActionResult<Ticket>> CreateTicket(Ticket ticketDto)
         {
-            ticket.Status = "Maintenance";
-            ticket.CreatedAt = DateTime.UtcNow;
-            _context.Tickets.Add(ticket);
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+            
+                if (int.TryParse(userIdClaim, out int parsedUserId))
+                {
+                    ticketDto.CreatedById = parsedUserId;
 
+                    if (userRole == "Admin" && ticketDto.AssetId.HasValue)
+                    {
+                        var asset = await _context.Assets.FindAsync(ticketDto.AssetId.Value);
+                        if (asset != null && asset.UserId.HasValue)
+                        {
+                            ticketDto.UserId = asset.UserId.Value;
+                        }
+                        else
+                        {
+                            ticketDto.UserId = parsedUserId;
+                        }
+                }
+                else
+                {
+                    ticketDto.UserId = parsedUserId;
+                }
+
+                ticketDto.Status = "Open";
+                ticketDto.CreatedAt = DateTime.UtcNow;
+
+                _context.Tickets.Add(ticketDto);
+                await _context.SaveChangesAsync();
+
+            // Activity log
             var log = new ActivityLog
             {
                 Action = "CREATE_TICKET",
-                Description = $"New Ticket '{ticket.Subject}' has been opened.",
+                Description = $"Ticket ID {ticketDto.Id} ({ticketDto.Subject}) created for User ID {ticketDto.UserId}.",
                 Timestamp = DateTime.UtcNow
             };
             _context.ActivityLogs.Add(log);
-
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetTickets), new { id = ticket.Id }, ticket);
+            return Ok(ticketDto);
         }
+
+        return Unauthorized();  
+            }
 
         // PUT: api/tickets/{id}
         [HttpPut("{id}")]

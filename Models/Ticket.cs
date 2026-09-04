@@ -19,7 +19,7 @@ namespace AssetManagementApi.Models
 
         // Priority: Low, Medium, High, Urgent
         public string Priority { get; set; } = "Medium";
-
+        
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public int? AssetId { get; set; }
@@ -27,5 +27,11 @@ namespace AssetManagementApi.Models
         public Asset? Asset { get; set; }
 
         public int? UserId { get; set; }
+        [ForeignKey("UserId")]
+        public User? User { get; set; }
+
+        public int? CreatedById { get; set; }
+        [ForeignKey("CreatedById")]
+        public User? CreatedBy { get; set; }
     }
 }

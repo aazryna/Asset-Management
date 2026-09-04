@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import * as XLSX from 'xlsx'
 import { userService } from '../services/userService'
 
@@ -145,7 +145,15 @@ const exportUsersToExcel = () => {
 
 onMounted(() => {
     fetchUsers()
+    window.addEventListener('click', closeMenuOutside)
 })
+
+const closeMenuOutside = (e) => {
+    if (!e.target.closest('.relative')) {
+        openMenuId.value = null
+    }
+}
+
 </script>
 
 <template>
@@ -172,8 +180,8 @@ onMounted(() => {
 
                 <div>
                     <button @click="exportUsersToExcel"
-                        class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition inline-flex items-center gap-2">
-                        📂 Export Users
+                        class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition inline-flex items-center gap-2">
+                        📊 Export Users
                     </button>
                 </div>
             </div>
@@ -240,11 +248,15 @@ onMounted(() => {
                                 </button>
 
                                 <div v-if="openMenuId === user.id"
-                                    class="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
+                                    class="absolute right-0 mt-2 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1.5 text-left">
                                     <button @click="openEditModal(user); openMenuId = null"
-                                        class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 block">Edit</button>
+                                        class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+                                        ✏️ Edit
+                                    </button>
                                     <button @click="removeUser(user.id); openMenuId = null"
-                                        class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 block">Delete</button>
+                                        class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 flex items-center gap-2">
+                                        🗑️ Delete
+                                    </button>
                                 </div>
                             </td>
                         </tr>

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, computed, onMounted } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import * as XLSX from 'xlsx'
 import { assetService } from '../services/assetService'
 import { ticketService } from '../services/ticketService'
@@ -317,7 +317,14 @@ watch(() => editingAsset.value.status, (newStatus, oldStatus) => {
 onMounted(() => {
     fetchAssets()
     fetchUsersList()
+    window.addEventListener('click', closeMenuOutside)
 })
+
+const closeMenuOutside = (e) => {
+    if (!e.target.closest('.relative')) {
+        openMenuId.value = null
+    }
+}
 </script>
 
 <template>
@@ -404,10 +411,9 @@ onMounted(() => {
 
                 <!-- Import Excel Button on the Right -->
                 <div v-if="isAdmin">
-                    <input type="file" ref="fileInput" @change="handleFileUpload" accept=".xlsx, .xls" class="hidden" />
-                    <button @click="$refs.fileInput.click()"
-                        class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition inline-flex items-center gap-2">
-                        📂 Import Excel
+                    <button @click="exportToExcel"
+                        class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition inline-flex items-center gap-2">
+                        📊 Export Excel
                     </button>
                 </div>
             </div>

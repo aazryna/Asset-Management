@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as XLSX from 'xlsx'
 import { userService } from '../services/userService'
 
@@ -11,18 +11,12 @@ const searchQuery = ref('')
 const openMenuId = ref(null)
 
 // Modal states
-const showModal = ref(false)
 const showEditModal = ref(false)
-const submitting = ref(false)
 const updating = ref(false)
 
-// Form for add new user
-const newUser = ref({
-    name: '',
-    email: '',
-    role: 'Staff',
-    status: 'Active'
-})
+// Pagination state
+const currentPage = ref(1)
+const pageSize = ref(10)
 
 // State for edit modal
 const editingUser = ref({
@@ -53,20 +47,6 @@ const fetchUsers = async () => {
     }
 }
 
-// Create User Action
-const createUser = async () => {
-    submitting.value = true
-    try {
-        await userService.createUser(newUser.value)
-        newUser.value = { name: '', email: '', role: 'Staff', status: 'Active' }
-        showModal.value = false
-        await fetchUsers()
-    } catch (err) {
-        alert('Error: ' + (err.response?.data?.message || err.message))
-    } finally {
-        submitting.value = false
-    }
-}
 
 // Update User Action
 const updateUser = async () => {
@@ -99,6 +79,29 @@ const filteredUsers = computed(() => {
     })
 })
 
+// Paginated users
+const totalPages = computed(() => Math.ceil(filteredUsers.value.length / pageSize.value))
+
+const paginatedUsers = computed(() => {
+    const start = (currentPage.value - 1) * pageSize.value
+    const end = start + pageSize.value
+    return filteredUsers.value.slice(start, end)
+})
+
+const paginationStart = computed(() => {
+    if (filteredUsers.value.length === 0) return 0
+    return (currentPage.value - 1) * pageSize.value + 1
+})
+
+const paginationEnd = computed(() => {
+    const end = currentPage.value * pageSize.value
+    return end > filteredUsers.value.length ? filteredUsers.value.length : end
+})
+
+// Reset to page 1 on search change
+watch(searchQuery, () => {
+    currentPage.value = 1
+})
 
 // Open Edit modal and Load Data
 const openEditModal = (user) => {
@@ -143,17 +146,20 @@ const exportUsersToExcel = () => {
     XLSX.writeFile(workbook, 'user_management_list.xlsx')
 }
 
-onMounted(() => {
-    fetchUsers()
-    window.addEventListener('click', closeMenuOutside)
-})
-
 const closeMenuOutside = (e) => {
     if (!e.target.closest('.relative')) {
         openMenuId.value = null
     }
 }
 
+onMounted(() => {
+    fetchUsers()
+    window.addEventListener('click', closeMenuOutside)
+})
+
+onUnmounted(() => {
+    window.removeEventListener('click', closeMenuOutside)
+})
 </script>
 
 <template>
@@ -165,10 +171,7 @@ const closeMenuOutside = (e) => {
                     <p class="text-gray-600 dark:text-gray-400">Manage system operators, assign access roles, and export
                         records.</p>
                 </div>
-                <button @click="showModal = true"
-                    class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition">
-                    + Add New User
-                </button>
+
             </header>
 
             <!-- Search Bar & Export Button -->
@@ -269,81 +272,64 @@ const closeMenuOutside = (e) => {
                 </table>
             </div>
 
-            <!-- Add User Modal -->
-            <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div
-                    class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full shadow-xl border border-gray-200 dark:border-gray-700">
-                    <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4">Add New User</h3>
-                    <form @submit.prevent="createUser" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full
-                                Name</label>
-                            <input v-model="newUser.name" type="text" required
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email
-                                Address</label>
-                            <input v-model="newUser.email" type="email" required
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
-                            <select v-model="newUser.role"
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none">
-                                <option value="Admin">Admin</option>
-                                <option value="Staff">Staff</option>
-                            </select>
-                        </div>
-                        <div class="flex justify-end space-x-3 mt-6">
-                            <button type="button" @click="showModal = false"
-                                class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition font-medium">Cancel</button>
-                            <button type="submit" :disabled="submitting"
-                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition font-medium">
-                                {{ submitting ? 'Saving...' : 'Save User' }}
-                            </button>
-                        </div>
-                    </form>
+            <!-- Pagination Bar -->
+            <div v-if="filteredUsers.length > 0"
+                class="px-6 py-4 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <span class="text-sm text-gray-600 dark:text-gray-400">
+                    Showing {{ paginationStart }} to {{ paginationEnd }} of {{ filteredUsers.length }} entries
+                </span>
+                <div class="flex items-center space-x-2">
+                    <button @click="currentPage--" :disabled="currentPage === 1"
+                        class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                        Previous
+                    </button>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Page {{ currentPage }} of {{ totalPages || 1 }}
+                    </span>
+                    <button @click="currentPage++" :disabled="currentPage >= totalPages"
+                        class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                        Next
+                    </button>
                 </div>
             </div>
+        </div>
 
-            <!-- Edit User Modal -->
-            <div v-if="showEditModal"
-                class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div
-                    class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full shadow-xl border border-gray-200 dark:border-gray-700">
-                    <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4">Edit User</h3>
-                    <form @submit.prevent="updateUser" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full
-                                Name</label>
-                            <input v-model="editingUser.name" type="text" required
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email
-                                Address</label>
-                            <input v-model="editingUser.email" type="email" required
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
-                            <select v-model="editingUser.role"
-                                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none">
-                                <option value="Admin">Admin</option>
-                                <option value="Staff">Staff</option>
-                            </select>
-                        </div>
-                        <div class="flex justify-end space-x-3 mt-6">
-                            <button type="button" @click="showEditModal = false"
-                                class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition font-medium">Cancel</button>
-                            <button type="submit" :disabled="updating"
-                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition font-medium">
-                                {{ updating ? 'Updating...' : 'Update Changes' }}
-                            </button>
-                        </div>
-                    </form>
-                </div>
+
+        <!-- Edit User Modal -->
+        <div v-if="showEditModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div
+                class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full shadow-xl border border-gray-200 dark:border-gray-700">
+                <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4">Edit User</h3>
+                <form @submit.prevent="updateUser" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full
+                            Name</label>
+                        <input v-model="editingUser.name" type="text" required
+                            class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email
+                            Address</label>
+                        <input v-model="editingUser.email" type="email" required
+                            class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
+                        <select v-model="editingUser.role"
+                            class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="Admin">Admin</option>
+                            <option value="Staff">Staff</option>
+                        </select>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" @click="showEditModal = false"
+                            class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg transition font-medium">Cancel</button>
+                        <button type="submit" :disabled="updating"
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition font-medium">
+                            {{ updating ? 'Updating...' : 'Update Changes' }}
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>

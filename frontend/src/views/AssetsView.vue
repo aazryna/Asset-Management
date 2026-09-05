@@ -12,11 +12,14 @@ const loading = ref(true)
 const error = ref(null)
 const searchQuery = ref('')
 const openMenuId = ref(null)
-
 const usersList = ref([])
 
 const successMessage = ref('')
 const errorMessage = ref('')
+
+// Pagination state
+const currentPage = ref(1)
+const itemsPerPage = ref(50)
 
 const showSuccess = (msg) => {
     successMessage.value = msg
@@ -44,8 +47,7 @@ const newAsset = ref({
     name: '',
     category: '',
     serialNumber: '',
-    status: 'Available',
-    userId: ''
+    userId: null
 })
 
 //state for edit modal
@@ -149,9 +151,22 @@ const filteredAssets = computed(() => {
 const createAsset = async () => {
     submitting.value = true
     try {
-        console.log("DATA YANG HENDAK DIHANTAR:", newAsset.value)
-        await assetService.createAsset(newAsset.value)
-        newAsset.value = { name: '', category: '', serialNumber: '', status: 'Available' }
+        const payload = {
+            name: newAsset.value.name,
+            category: newAsset.value.category,
+            serialNumber: newAsset.value.serialNumber,
+            userId: newAsset.value.userId ? Number(newAsset.value.userId) : null
+        }
+        console.log("Payload hantar ke backend:", payload) // 
+        await assetService.createAsset(payload)
+
+        newAsset.value = {
+            name: '',
+            category: '',
+            serialNumber: '',
+            userId: null
+        }
+
         showModal.value = false
         await fetchAssets()
     } catch (err) {
@@ -214,11 +229,6 @@ const submitMaintenanceRequest = async (formData) => {
             priority: formData.priority,
             assetId: selectedAssetForTicket.value.id,
             status: 'Open'
-        })
-        const targetAsset = selectedAssetForTicket.value
-        await assetService.updateAsset(targetAsset.id, {
-            ...targetAsset,
-            status: 'Maintenance'
         })
 
         showMaintenanceModal.value = false
@@ -283,7 +293,7 @@ const handleFileUpload = async (event) => {
                     name: row['Asset Name'] || row['name'] || '',
                     category: row['Category'] || row['category'] || '',
                     serialNumber: row['Serial Number'] || row['serialNumber'] || '',
-                    status: row['Status'] || row['status'] || 'Available'
+                    // status: row['Status'] || row['status'] || 'Available'
                 }
 
                 if (assetPayload.name) {
@@ -304,6 +314,27 @@ const handleFileUpload = async (event) => {
     reader.readAsArrayBuffer(file)
 }
 
+const paginatedAssets = computed(() => {
+    const start = (currentPage.value - 1) * itemsPerPage.value
+    const end = start + itemsPerPage.value
+    return filteredAssets.value.slice(start, end)
+})
+
+const totalPages = computed(() => {
+    return Math.ceil(filteredAssets.value.length / itemsPerPage.value)
+})
+
+// Label info (e.g., Showing 1 to 50 of 120 entries)
+const paginationStart = computed(() => {
+    if (filteredAssets.value.length === 0) return 0
+    return (currentPage.value - 1) * itemsPerPage.value + 1
+})
+
+const paginationEnd = computed(() => {
+    const end = currentPage.value * itemsPerPage.value
+    return end > filteredAssets.value.length ? filteredAssets.value.length : end
+})
+
 watch(() => editingAsset.value.status, (newStatus, oldStatus) => {
     if (showEditModal.value && newStatus === 'Maintenance' && oldStatus !== 'Maintenance') {
         showEditModal.value = false
@@ -312,6 +343,10 @@ watch(() => editingAsset.value.status, (newStatus, oldStatus) => {
 
         showMaintenanceModal.value = true
     }
+})
+
+watch(searchQuery, () => {
+    currentPage.value = 1
 })
 
 onMounted(() => {
@@ -337,7 +372,7 @@ const closeMenuOutside = (e) => {
                     <p class="text-gray-600 dark:text-gray-400">
                         {{ isAdmin ? 'Company asset inventory list.' : 'My personal assigned assets.' }}</p>
                 </div>
-                <button v-if="isAdmin" @click="showModal = true"
+                <button v-if="isAdmin" @click="showModal = true; newAsset.userId = null"
                     class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition">
                     + Add New Asset
                 </button>
@@ -362,7 +397,6 @@ const closeMenuOutside = (e) => {
                     </div>
                 </div>
 
-                <!-- Kotak 2: Assigned vs Unassigned (HANYA NAMPAK UNTUK ADMIN - Staff akan di-hide) -->
                 <div v-if="isAdmin"
                     class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 transition-colors duration-200">
                     <p class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
@@ -383,7 +417,6 @@ const closeMenuOutside = (e) => {
                     </div>
                 </div>
 
-                <!-- Kotak 3: Maintenance Card (Tukar teks tajuk & value je) -->
                 <div
                     class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 flex items-center justify-between transition-colors duration-200">
                     <div>
@@ -422,111 +455,135 @@ const closeMenuOutside = (e) => {
             <div v-if="loading" class="text-blue-600 dark:text-blue-400 font-medium">Loading data...</div>
             <div v-if="error" class="text-red-500 font-medium">Error: {{ error }}</div>
 
-            <!-- Asset Table -->
+            <!-- Asset Table Wrapper -->
             <div v-if="!loading && !error"
-                class="bg-white dark:bg-gray-800 shadow-md rounded-lg border border-gray-200 dark:border-gray-700 overflow-visible transition-colors duration-200">
-                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead class="bg-gray-50 dark:bg-gray-700 transition-colors duration-200">
-                        <tr>
-                            <th
-                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                ID</th>
-                            <th
-                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                Asset Name</th>
-                            <th
-                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                Category</th>
-                            <th
-                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                Serial Number
-                            </th>
-                            <th
-                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                Status</th>
-                            <th
-                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                Assigned User</th>
-                            <th
-                                class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody
-                        class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700 transition-colors duration-200">
-                        <tr v-for="asset in filteredAssets" :key="asset.id"
-                            class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-150">
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{ asset.id
-                            }}</td>
-                            <td
-                                class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-800 dark:text-gray-100">
-                                {{ asset.name }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{{
-                                asset.category }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{{
-                                asset.serialNumber }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                <span
-                                    class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300">
-                                    {{ asset.status }}
-                                </span>
-                            </td>
-
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                                <span v-if="asset.user || asset.User || asset.userId || asset.UserId">
-                                    {{
-                                        asset.user?.name ?? asset.user?.Name ?? asset.user?.username ?? asset.user?.Username
-                                        ??
-                                        asset.User?.name ?? asset.User?.Name ?? asset.User?.username ?? asset.User?.Username
-                                        ??
-                                        'User #' + (asset.userId ?? asset.UserId)
-                                    }}
-                                </span>
-                                <span v-else class="text-gray-400 italic">
-                                    Unassigned
-                                </span>
-                            </td>
-
-                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
-                                <div class="flex items-center justify-end gap-2">
-                                    <button @click="openMaintenanceModal(asset)" title="Report Issue to IT"
-                                        class="text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30 px-3 py-1.5 rounded-md text-xs font-medium transition inline-flex items-center gap-1 bg-orange-50/50 dark:bg-orange-950/30">
-                                        🔧 Report Issue
-                                    </button>
-
-                                    <div v-if="isAdmin" class="relative">
-                                        <button @click="toggleMenu(asset.id)"
-                                            class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 p-2 rounded-md transition inline-flex items-center justify-center">
-                                            <span>⋮</span>
+                class="bg-white dark:bg-gray-800 shadow-md rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors duration-200">
+                <div class="overflow-x-auto max-h-[650px] overflow-y-auto">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10 transition-colors duration-200">
+                            <tr>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                    ID</th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                    Asset Name</th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                    Category</th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                    Serial Number
+                                </th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                    Status</th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                    Assigned User</th>
+                                <th
+                                    class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                    Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody
+                            class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700 transition-colors duration-200">
+                            <tr v-for="asset in paginatedAssets" :key="asset.id"
+                                class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-150">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{
+                                    asset.id }}</td>
+                                <td
+                                    class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-800 dark:text-gray-100">
+                                    {{ asset.name }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{{
+                                    asset.category }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{{
+                                    asset.serialNumber }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                    <span :class="{
+                                        'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300': asset.status === 'Available',
+                                        'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300': asset.status === 'In Use',
+                                        'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300': asset.status === 'Maintenance'
+                                    }" class="px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full">
+                                        {{ asset.status }}
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                                    <span v-if="asset.user || asset.User || asset.userId || asset.UserId">
+                                        {{
+                                            asset.user?.name ?? asset.user?.Name ?? asset.user?.username ??
+                                            asset.user?.Username
+                                            ??
+                                            asset.User?.name ?? asset.User?.Name ?? asset.User?.username ??
+                                            asset.User?.Username
+                                            ??
+                                            'User #' + (asset.userId ?? asset.UserId)
+                                        }}
+                                    </span>
+                                    <span v-else class="text-gray-400 italic">
+                                        Unassigned
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <button @click="openMaintenanceModal(asset)" title="Report Issue to IT"
+                                            class="text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30 px-3 py-1.5 rounded-md text-xs font-medium transition inline-flex items-center gap-1 bg-orange-50/50 dark:bg-orange-950/30">
+                                            🔧 Report Issue
                                         </button>
 
-                                        <div v-if="openMenuId === asset.id"
-                                            class="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
-                                            <button @click.stop="openEditModal(asset); openMenuId = null"
-                                                class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 block text-left">
-                                                ✏️ Edit Asset
+                                        <div v-if="isAdmin" class="relative">
+                                            <button @click="toggleMenu(asset.id)"
+                                                class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 p-2 rounded-md transition inline-flex items-center justify-center">
+                                                <span>⋮</span>
                                             </button>
-                                            <button @click.stop="removeAsset(asset.id); openMenuId = null"
-                                                class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 block text-left">
-                                                🗑️ Delete
-                                            </button>
+
+                                            <div v-if="openMenuId === asset.id"
+                                                class="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
+                                                <button @click.stop="openEditModal(asset); openMenuId = null"
+                                                    class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 block text-left">
+                                                    ✏️ Edit Asset
+                                                </button>
+                                                <button @click.stop="removeAsset(asset.id); openMenuId = null"
+                                                    class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 block text-left">
+                                                    🗑️ Delete
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr v-if="filteredAssets.length === 0">
-                            <!-- ✅ 2. TUKAR COLSPAN JADI 7 -->
-                            <td colspan="7" class="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">No
-                                asset records found.
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+                                </td>
+                            </tr>
+                            <tr v-if="filteredAssets.length === 0">
+                                <td colspan="7" class="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                                    No asset records found.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
 
-            <!-- Modal Borang Tambah Aset -->
+                <!-- Pagination Bar -->
+                <div v-if="filteredAssets.length > 0"
+                    class="px-6 py-4 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <span class="text-sm text-gray-600 dark:text-gray-400">
+                        Showing {{ paginationStart }} to {{ paginationEnd }} of {{ filteredAssets.length }} entries
+                    </span>
+                    <div class="flex items-center space-x-2">
+                        <button @click="currentPage--" :disabled="currentPage === 1"
+                            class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                            Previous
+                        </button>
+                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Page {{ currentPage }} of {{ totalPages || 1 }}
+                        </span>
+                        <button @click="currentPage++" :disabled="currentPage >= totalPages"
+                            class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                            Next
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <!-- Asset Addition Form Modal -->
             <div v-if="showModal"
                 class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
                 <div
@@ -563,23 +620,13 @@ const closeMenuOutside = (e) => {
                                 Staff (Optional)</label>
                             <select v-model="newAsset.userId"
                                 class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="">-- Unassigned (Available) --</option>
+                                <option :value="null">-- Unassigned (Available) --</option>
                                 <option v-for="user in usersList" :key="user.id" :value="user.id">
                                     {{ user.name || user.username }} ({{ user.role }})
                                 </option>
                             </select>
                         </div>
 
-                        <div>
-                            <label
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
-                            <select v-model="newAsset.status"
-                                class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="Available">Available</option>
-                                <option value="In Use">In Use</option>
-                                <option value="Maintenance">Maintenance</option>
-                            </select>
-                        </div>
 
                         <div class="flex justify-end space-x-3 mt-6">
                             <button type="button" @click="showModal = false"
@@ -623,15 +670,17 @@ const closeMenuOutside = (e) => {
                         </div>
 
                         <div>
-                            <label
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
-                            <select v-model="editingAsset.status"
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Assign to
+                                Staff</label>
+                            <select v-model="editingAsset.userId"
                                 class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="Available">Available</option>
-                                <option value="In Use">In Use</option>
-                                <option value="Maintenance">Maintenance</option>
+                                <option :value="null">-- Unassigned (Available) --</option>
+                                <option v-for="user in usersList" :key="user.id" :value="user.id">
+                                    {{ user.name || user.username }} ({{ user.role }})
+                                </option>
                             </select>
                         </div>
+
 
                         <div class="flex justify-end space-x-3 mt-6">
                             <button type="button" @click="showEditModal = false"

@@ -77,28 +77,12 @@ namespace AssetManagementApi.Controllers
         [Authorize]
         public async Task<ActionResult<Asset>> CreateAsset(Asset asset)
         {
-            var userRole = User.FindFirst(ClaimTypes.Role)?.Value 
-                        ?? User.FindFirst("role")?.Value;
-
-            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
-                            ?? User.FindFirst("sub")?.Value;
-
-            if (!int.TryParse(userIdString, out int currentUserId))
+            // A missing assignment must remain NULL; never infer the logged-in user.
+            if (asset.UserId == 0)
             {
-                return Unauthorized(new { message = "Invalid token or user ID not found." });
+                asset.UserId = null;
             }
-
-            if (userRole == "Admin" || string.IsNullOrEmpty(userRole))
-            {
-                if (asset.UserId == null || asset.UserId == 0)
-                {
-                    asset.UserId = currentUserId;
-                }
-            }
-            else
-            {
-                asset.UserId = currentUserId;
-            }
+            asset.Status = asset.UserId != null ? "In Use" : "Available";
 
             _context.Assets.Add(asset);
             await _context.SaveChangesAsync();
@@ -108,34 +92,67 @@ namespace AssetManagementApi.Controllers
             return CreatedAtAction(nameof(GetAsset), new { id = asset.Id }, asset); 
         }
 
-        [HttpPut("{id}")]
-        [Authorize]
-        public async Task<IActionResult> UpdateAsset(int id, Asset asset)
+        
+            [HttpPut("{id}")]
+            [Authorize]
+            public async Task<IActionResult> UpdateAsset(int id, Asset assetDto)
+            {
+                if (id != assetDto.Id)
+            {
+            return BadRequest(new { message = "Asset ID mismatch"});
+            }
+
+            var existingAsset = await _context.Assets.FindAsync(id);
+            if (existingAsset == null)
+            {
+                return NotFound(new { message = "Asset not found" });
+            }
+
+            existingAsset.Name = assetDto.Name;
+            existingAsset.serialNumber = assetDto.serialNumber;
+            existingAsset.Category = assetDto.Category;
+    
+            // Handle unassigned user
+            if (assetDto.UserId == 0 || assetDto.UserId == null)
+            {
+                existingAsset.UserId = null;
+            }
+            else
+            {
+                existingAsset.UserId = assetDto.UserId;
+            }
+
+            // 3. Logic auto-status ikut arahan hang
+            if (existingAsset.UserId != null)
+            {
+                existingAsset.Status = "In Use";
+            }
+            else
         {
-            if (id != asset.Id)
+            if (existingAsset.Status != "Maintenance")
             {
-                return BadRequest(new { message = "Asset ID mismatch"});
+                existingAsset.Status = "Available";
             }
+        }
 
-            _context.Entry(asset).State = EntityState.Modified;
-
-            try 
-            {
-                await _context.SaveChangesAsync();
-            }
+        try 
+        {
+            await _context.SaveChangesAsync();
+        }
             catch (DbUpdateConcurrencyException)
+        {
+            if (!AssetExists(id))
             {
-                if (!AssetExists(id))
-                {
-                    return NotFound(new { message = "Asset not found" });
-                }
-                else
-                {
-                    throw;
-                }
+            return NotFound(new { message = "Asset not found" });
             }
+            else
+            {
+                throw;
+            }
+        }
 
-            return NoContent();
+        return NoContent();
+
         }
 
         //DELETE: api/Assets5 (Delete asset)[cite: 1]
@@ -144,12 +161,14 @@ namespace AssetManagementApi.Controllers
         public async Task<IActionResult> DeleteAsset(int id)
         {
             var asset = await _context.Assets.FindAsync(id);
-            if (asset == null)
+
+            if (asset == null || asset.IsDeleted)
             {
                 return NotFound(new { message = "Asset not found" });
             }
 
-            _context.Assets.Remove(asset);
+            asset.IsDeleted = true;
+            asset.Status = "Decommissioned";
             await _context.SaveChangesAsync();
 
             return NoContent();

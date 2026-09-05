@@ -36,7 +36,7 @@ namespace AssetManagementApi.Controllers
         {
                 if (int.TryParse(userIdClaim, out int parsedUserId))
             {
-                query = query.Where(t => t.UserId == parsedUserId);
+                query = query.Where(t => t.CreatedById == parsedUserId || t.UserId == parsedUserId || t.Asset.UserId == parsedUserId);
             }
                 else
             {
@@ -52,51 +52,61 @@ namespace AssetManagementApi.Controllers
         [HttpPost]
         public async Task<ActionResult<Ticket>> CreateTicket(Ticket ticketDto)
         {
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            
-                if (int.TryParse(userIdClaim, out int parsedUserId))
-                {
-                    ticketDto.CreatedById = parsedUserId;
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
-                    if (userRole == "Admin" && ticketDto.AssetId.HasValue)
-                    {
-                        var asset = await _context.Assets.FindAsync(ticketDto.AssetId.Value);
-                        if (asset != null && asset.UserId.HasValue)
-                        {
-                            ticketDto.UserId = asset.UserId.Value;
-                        }
-                        else
-                        {
-                            ticketDto.UserId = parsedUserId;
-                        }
+            if (!int.TryParse(userIdClaim, out int parsedUserId))
+        {
+            return Unauthorized();
+        }
+
+        ticketDto.CreatedById = parsedUserId;
+
+        if (ticketDto.AssetId.HasValue)
+        {
+            var asset = await _context.Assets.FindAsync(ticketDto.AssetId.Value);
+            if (asset != null)
+            {
+                if (userRole == "Admin" && asset.UserId.HasValue)
+                {
+                    ticketDto.UserId = asset.UserId.Value;
                 }
                 else
                 {
                     ticketDto.UserId = parsedUserId;
                 }
 
-                ticketDto.Status = "Open";
-                ticketDto.CreatedAt = DateTime.UtcNow;
-
-                _context.Tickets.Add(ticketDto);
-                await _context.SaveChangesAsync();
-
-            // Activity log
-            var log = new ActivityLog
+                asset.Status = "Maintenance";
+                _context.Entry(asset).State = EntityState.Modified;
+            }
+            else
             {
-                Action = "CREATE_TICKET",
-                Description = $"Ticket ID {ticketDto.Id} ({ticketDto.Subject}) created for User ID {ticketDto.UserId}.",
-                Timestamp = DateTime.UtcNow
-            };
-            _context.ActivityLogs.Add(log);
-            await _context.SaveChangesAsync();
-
-            return Ok(ticketDto);
+                ticketDto.UserId = parsedUserId;
+            }
+        }
+        else
+        {
+            ticketDto.UserId = parsedUserId;
         }
 
-        return Unauthorized();  
-            }
+        ticketDto.Status = "Open";
+        ticketDto.CreatedAt = DateTime.UtcNow;
+
+        _context.Tickets.Add(ticketDto);
+        await _context.SaveChangesAsync();
+
+        // Activity log
+        var log = new ActivityLog
+        {
+            Action = "CREATE_TICKET",
+            Description = $"Ticket ID {ticketDto.Id} ({ticketDto.Subject}) created for User ID {ticketDto.UserId}.",
+            Timestamp = DateTime.UtcNow
+        };
+        _context.ActivityLogs.Add(log);
+        await _context.SaveChangesAsync();
+
+        return Ok(ticketDto);
+}
 
         // PUT: api/tickets/{id}
         [HttpPut("{id}")]
@@ -107,7 +117,14 @@ namespace AssetManagementApi.Controllers
                 return BadRequest();
             }
 
-            _context.Entry(ticket).State = EntityState.Modified;
+            var existingTicket = await _context.Tickets.FindAsync(id);
+            if (existingTicket == null)
+            {
+                return NotFound();
+            }
+
+            existingTicket.Status = ticket.Status;
+            existingTicket.Resolution = ticket.Resolution;
 
             try
             {
@@ -115,7 +132,7 @@ namespace AssetManagementApi.Controllers
                 var log = new ActivityLog
                 {
                     Action = "UPDATE_TICKET",
-                    Description = $"Ticket ID {id} ({ticket.Subject}) status updated to {ticket.Status}.",
+                    Description = $"Ticket ID {id} ({existingTicket.Subject}) status updated to {existingTicket.Status}.",
                     Timestamp = DateTime.UtcNow
                 };
                 _context.ActivityLogs.Add(log);

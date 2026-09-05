@@ -20,7 +20,6 @@ export const useDarkMode = () => {
     }
   };
 
-  // Sync class masa page mula-mula load
   const initTheme = () => {
     if (import.meta.client && isDark.value) {
       document.documentElement.classList.add("dark");

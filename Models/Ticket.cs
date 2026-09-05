@@ -14,6 +14,8 @@ namespace AssetManagementApi.Models
 
         public string Description { get; set; } = string.Empty;
 
+        public string? Resolution { get; set; }
+
         // Status: Open, In Progress, Resolved, Closed
         public string Status { get; set; } = "Open";
 

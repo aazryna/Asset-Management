@@ -13,9 +13,18 @@ const searchQuery = ref('')
 const statusFilter = ref('')
 const openMenuId = ref(null)
 const authStore = useAuthStore()
+const showResolveModal = ref(false)
+const resolvingTicketId = ref(null)
+const resolutionFeedback = ref('')
+const selectedResolution = ref('')
+const showResolutionModal = ref(false)
 
 const successMessage = ref('')
 const errorMessage = ref('')
+
+// Pagination state
+const currentPage = ref(1)
+const pageSize = ref(10)
 
 const showSuccess = (msg) => {
     successMessage.value = msg
@@ -81,11 +90,42 @@ const filteredTickets = computed(() => {
     })
 })
 
+// Paginated tickets
+const totalPages = computed(() => Math.ceil(filteredTickets.value.length / pageSize.value))
+
+const paginatedTickets = computed(() => {
+    const start = (currentPage.value - 1) * pageSize.value
+    const end = start + pageSize.value
+    return filteredTickets.value.slice(start, end)
+})
+
+const paginationStart = computed(() => {
+    if (filteredTickets.value.length === 0) return 0
+    return (currentPage.value - 1) * pageSize.value + 1
+})
+
+const paginationEnd = computed(() => {
+    const end = currentPage.value * pageSize.value
+    return end > filteredTickets.value.length ? filteredTickets.value.length : end
+})
+
+// Reset to page 1 on search or filter change
+import { watch } from 'vue'
+watch([searchQuery, statusFilter], () => {
+    currentPage.value = 1
+})
+
 const updateTicketStatus = async (ticket, newStatus) => {
     try {
         await ticketService.updateTicket(ticket.id, {
-            ...ticket,
-            status: newStatus
+            id: ticket.id,
+            subject: ticket.subject,
+            description: ticket.description,
+            priority: ticket.priority,
+            assetId: ticket.assetId,
+            status: newStatus,
+            resolution: ticket.resolution || '',
+            userId: ticket.userId || ticket.createdBy?.id || ticket.creator?.id
         })
         showSuccess(`Ticket #${ticket.id} status updated to ${newStatus}!`)
         await fetchData()
@@ -107,6 +147,56 @@ const createTicket = async () => {
         showError('Error: ' + err.message)
     } finally {
         submitting.value = false
+    }
+}
+
+const truncateText = (text, maxLength = 50) => {
+    if (!text) return ''
+    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text
+}
+
+
+
+const viewFullResolution = (resolutionText) => {
+    selectedResolution.value = resolutionText
+    showResolutionModal.value = true
+}
+
+const openResolvePrompt = (ticket) => {
+    resolvingTicketId.value = ticket.id
+    resolutionFeedback.value = ''
+    showResolveModal.value = true
+}
+
+const submitResolvedWithFeedback = async () => {
+    console.log("Button clicked, resolvingTicketId:", resolvingTicketId.value)
+
+    const ticketToResolve = tickets.value.find(t => t.id === resolvingTicketId.value)
+    if (!ticketToResolve) return
+
+    try {
+        await ticketService.updateTicket(resolvingTicketId.value, {
+            ...ticketToResolve,
+            status: 'Resolved',
+            resolution: resolutionFeedback.value,
+            userId: ticketToResolve.userId || ticketToResolve.createdBy?.id
+        })
+
+        if (ticketToResolve.assetId) {
+            const targetAsset = assets.value.find(a => a.id === ticketToResolve.assetId)
+            if (targetAsset) {
+                await assetService.updateAsset(targetAsset.id, {
+                    ...targetAsset,
+                    status: 'In Use'
+                })
+            }
+        }
+
+        showSuccess(`Ticket #${resolvingTicketId.value} successfully resolved!`)
+        showResolveModal.value = false
+        await fetchData()
+    } catch (err) {
+        showError('Error updating status: ' + err.message)
     }
 }
 
@@ -240,6 +330,16 @@ onUnmounted(() => {
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
                                 {{ ticket.assetId ? `Asset #${ticket.assetId}` : 'General Inquiry' }}
+                                <div v-if="ticket.resolution" class="mt-1">
+                                    <p
+                                        class="text-emerald-600 dark:text-emerald-400 text-xs font-medium truncate max-w-xs inline-block align-bottom">
+                                        Resolution: {{ ticket.resolution }}
+                                    </p>
+                                    <button @click="viewFullResolution(ticket.resolution)"
+                                        class="text-xs text-blue-500 hover:underline ml-1 font-medium">
+                                        [View]
+                                    </button>
+                                </div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm">
                                 <span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full"
@@ -262,7 +362,8 @@ onUnmounted(() => {
                                 </span>
                             </td>
                             <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
-                                {{ ticket.createdBy?.name || '-' }}
+                                {{ ticket.createdBy?.name || ticket.user?.name || ticket.creator?.name ||
+                                    ticket.author?.name || '-' }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
                                 <button @click="toggleMenu(ticket.id)"
@@ -270,36 +371,48 @@ onUnmounted(() => {
                                     <span>⋮</span>
                                 </button>
 
-                                <!-- KOD BARU YANG LEBIH LAWA -->
                                 <div v-if="openMenuId === ticket.id"
                                     class="absolute right-0 bottom-full mb-1 w-52 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl shadow-xl z-50 py-1.5 text-left divide-y divide-gray-100 dark:divide-gray-700">
 
-                                    <!-- Group Tindakan Status (Admin Sahaja) -->
                                     <div v-if="isAdmin" class="py-1">
-                                        <button v-if="ticket.status !== 'In Progress'"
-                                            @click="updateTicketStatus(ticket, 'In Progress'); openMenuId = null"
-                                            class="w-full px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-blue-50 dark:hover:bg-gray-700 hover:text-blue-600 dark:hover:text-blue-400 flex items-center space-x-2.5 transition">
-                                            <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor"
+                                        <!-- UBAH DI SINI: Papar butang 'Reopen Ticket' jika status dah Resolved -->
+                                        <button v-if="ticket.status === 'Resolved'"
+                                            @click="updateTicketStatus(ticket, 'Open'); openMenuId = null"
+                                            class="w-full px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-yellow-50 dark:hover:bg-gray-700 hover:text-yellow-600 dark:hover:text-yellow-400 flex items-center space-x-2.5 transition">
+                                            <svg class="w-4 h-4 text-yellow-500" fill="none" stroke="currentColor"
                                                 viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
+                                                </path>
                                             </svg>
-                                            <span>Mark as In Progress</span>
+                                            <span>Reopen Ticket</span>
                                         </button>
 
-                                        <button v-if="ticket.status !== 'Resolved'"
-                                            @click="updateTicketStatus(ticket, 'Resolved'); openMenuId = null"
-                                            class="w-full px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-emerald-50 dark:hover:bg-gray-700 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center space-x-2.5 transition">
-                                            <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor"
-                                                viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                    d="M5 13l4 4L19 7"></path>
-                                            </svg>
-                                            <span>Mark as Resolved</span>
-                                        </button>
+                                        <template v-else>
+                                            <button v-if="ticket.status !== 'In Progress'"
+                                                @click="updateTicketStatus(ticket, 'In Progress'); openMenuId = null"
+                                                class="w-full px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-blue-50 dark:hover:bg-gray-700 hover:text-blue-600 dark:hover:text-blue-400 flex items-center space-x-2.5 transition">
+                                                <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                </svg>
+                                                <span>Mark as In Progress</span>
+                                            </button>
+
+                                            <button @click="openResolvePrompt(ticket); openMenuId = null"
+                                                class="w-full px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-emerald-50 dark:hover:bg-gray-700 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center space-x-2.5 transition">
+                                                <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                                </svg>
+                                                <span>Mark as Resolved</span>
+                                            </button>
+                                        </template>
                                     </div>
 
-                                    <!-- Group Bahaya / Delete -->
                                     <div class="py-1">
                                         <button @click="removeTicket(ticket.id); openMenuId = null"
                                             class="w-full px-4 py-2 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 flex items-center space-x-2.5 transition">
@@ -323,7 +436,75 @@ onUnmounted(() => {
                 </table>
             </div>
 
-
+            <!-- Pagination Bar -->
+            <div v-if="filteredTickets.length > 0"
+                class="px-6 py-4 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <span class="text-sm text-gray-600 dark:text-gray-400">
+                    Showing {{ paginationStart }} to {{ paginationEnd }} of {{ filteredTickets.length }} entries
+                </span>
+                <div class="flex items-center space-x-2">
+                    <button @click="currentPage--" :disabled="currentPage === 1"
+                        class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                        Previous
+                    </button>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Page {{ currentPage }} of {{ totalPages || 1 }}
+                    </span>
+                    <button @click="currentPage++" :disabled="currentPage >= totalPages"
+                        class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                        Next
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
+
+    <!-- Modal Resolution Feedback -->
+    <div v-if="showResolveModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div
+            class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 border border-gray-100 dark:border-gray-700">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">
+                Resolution Feedback</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">Please provide a
+                summary of the issue or repair actions taken for future reference.</p>
+
+            <textarea v-model="resolutionFeedback" rows="4"
+                placeholder="E.g., Replaced faulty SSD / Reinstalled Windows drivers..."
+                class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 mb-4 resize-none"></textarea>
+
+            <div class="flex justify-end space-x-3">
+                <button @click="showResolveModal = false"
+                    class="px-4 py-2 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
+                    Cancel
+                </button>
+                <button @click="submitResolvedWithFeedback"
+                    class="px-4 py-2 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition">
+                    Submit & Resolve
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal View Full Resolution -->
+    <div v-if="showResolutionModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div
+            class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 border border-gray-100 dark:border-gray-700">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">
+                Resolution Details
+            </h3>
+            <p
+                class="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 p-4 rounded-lg mb-4 whitespace-pre-wrap">
+                {{ selectedResolution }}
+            </p>
+            <div class="flex justify-end">
+                <button @click="showResolutionModal = false"
+                    class="px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
 </template>

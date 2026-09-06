@@ -1,8 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { ticketService } from '../services/ticketService'
 import { assetService } from '../services/assetService'
 import { useAuthStore } from '../stores/auth'
+import { useRoute, useRouter } from 'vue-router'
 
 // State management
 const tickets = ref([])
@@ -14,7 +15,10 @@ const statusFilter = ref('')
 const priorityFilter = ref('')
 const openMenuId = ref(null)
 const menuPosition = ref({ top: 0, left: 0 })
+const menuElement = ref(null)
 const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const showResolveModal = ref(false)
 const resolvingTicketId = ref(null)
 const resolutionFeedback = ref('')
@@ -69,11 +73,23 @@ const toggleMenu = (id, event) => {
     }
 
     const buttonRect = event.currentTarget.getBoundingClientRect()
+    const menuWidth = 208
+
     menuPosition.value = {
         top: buttonRect.bottom + 4,
-        left: buttonRect.right - 208
+        left: Math.max(8, Math.min(window.innerWidth - menuWidth - 8, buttonRect.right - menuWidth))
     }
     openMenuId.value = id
+
+    nextTick(() => {
+        const menuRect = menuElement.value?.getBoundingClientRect()
+        if (!menuRect || menuRect.bottom <= window.innerHeight - 8) return
+
+        menuPosition.value = {
+            ...menuPosition.value,
+            top: Math.max(8, buttonRect.top - menuRect.height - 4)
+        }
+    })
 }
 
 // Fetch Tickets and Assets
@@ -86,6 +102,7 @@ const fetchData = async () => {
         ])
         tickets.value = ticketRes
         assets.value = assetRes
+        openTargetTicket()
     } catch (err) {
         error.value = err.message
     } finally {
@@ -126,8 +143,15 @@ const priorityCounts = computed(() => {
     return counts
 })
 
+const closedCount = computed(() => tickets.value.filter(ticket => ticket.status === 'Closed').length)
+
 const togglePriorityFilter = (priority) => {
     priorityFilter.value = priorityFilter.value === priority ? '' : priority
+}
+
+const toggleStatusFilter = (status) => {
+    statusFilter.value = statusFilter.value === status ? '' : status
+    priorityFilter.value = ''
 }
 
 // Paginated tickets
@@ -174,6 +198,26 @@ const updateTicketStatus = async (ticket, newStatus) => {
     }
 }
 
+const updateTicketPriority = async (ticket, newPriority) => {
+    try {
+        await ticketService.updateTicket(ticket.id, {
+            id: ticket.id,
+            subject: ticket.subject,
+            description: ticket.description,
+            priority: newPriority,
+            assetId: ticket.assetId,
+            status: ticket.status,
+            resolution: ticket.resolution || '',
+            userId: ticket.userId || ticket.createdBy?.id || ticket.creator?.id
+        })
+        openMenuId.value = null
+        showSuccess(`Ticket #${ticket.id} priority updated to ${newPriority}!`)
+        await fetchData()
+    } catch (err) {
+        showError('Error updating priority: ' + err.message)
+    }
+}
+
 // Create Ticket Action
 const createTicket = async () => {
     submitting.value = true
@@ -209,6 +253,33 @@ const viewTicketDetails = (ticket) => {
     selectedTicketDetails.value = ticket
     showTicketDetailsModal.value = true
 }
+
+const openTargetTicket = () => {
+    const targetTicketId = Number(route.query.ticketId)
+    if (!targetTicketId) return
+
+    const targetTicket = tickets.value.find(ticket => ticket.id === targetTicketId)
+    if (targetTicket) {
+        viewTicketDetails(targetTicket)
+        const { ticketId, ...remainingQuery } = route.query
+        router.replace({ query: remainingQuery })
+    }
+}
+
+watch(() => route.query.ticketId, openTargetTicket)
+
+const getAttachmentUrls = (ticket) => {
+    if (!ticket?.attachmentUrls) return []
+    if (Array.isArray(ticket.attachmentUrls)) return ticket.attachmentUrls
+
+    try {
+        return JSON.parse(ticket.attachmentUrls)
+    } catch {
+        return []
+    }
+}
+
+const getAttachmentUrl = (path) => path?.startsWith('http') ? path : `http://localhost:5090${path}`
 
 const openResolvePrompt = (ticket) => {
     resolvingTicketId.value = ticket.id
@@ -298,7 +369,7 @@ onUnmounted(() => {
 
             </header>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div v-if="isAdmin" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
                 <button type="button" @click="togglePriorityFilter('low')"
                     :class="priorityFilter === 'low' ? 'ring-2 ring-green-600 dark:ring-green-300 ring-offset-2 dark:ring-offset-gray-900' : ''"
                     class="bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-900/60 p-6 rounded-lg shadow-md border border-green-200 dark:border-green-800 flex items-center justify-between text-left transition-all duration-200">
@@ -353,6 +424,19 @@ onUnmounted(() => {
                     <div class="p-3 bg-red-50 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-full text-xl">!
                     </div>
                 </button>
+
+                <button type="button" @click="toggleStatusFilter('Closed')"
+                    :class="statusFilter === 'Closed' ? 'ring-2 ring-gray-600 dark:ring-gray-300 ring-offset-2 dark:ring-offset-gray-900' : ''"
+                    class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 p-6 rounded-lg shadow-md border border-gray-300 dark:border-gray-600 flex items-center justify-between text-left transition-all duration-200">
+                    <div>
+                        <p class="text-sm font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">Closed
+                        </p>
+                        <h3 class="text-3xl font-bold text-gray-700 dark:text-gray-100 mt-1">{{ closedCount }}</h3>
+                    </div>
+                    <div class="p-3 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-full text-xl">
+                        C
+                    </div>
+                </button>
             </div>
 
             <div v-if="successMessage"
@@ -389,6 +473,7 @@ onUnmounted(() => {
                         <option value="Open">Open</option>
                         <option value="In Progress">In Progress</option>
                         <option value="Resolved">Resolved</option>
+                        <option value="Closed">Closed</option>
                     </select>
                 </div>
             </div>
@@ -398,7 +483,7 @@ onUnmounted(() => {
             <div v-if="error" class="text-red-500 font-medium">Error: {{ error }}</div>
 
             <div v-if="!loading && !error"
-                class="bg-white dark:bg-gray-800 shadow-md rounded-lg border border-gray-200 dark:border-gray-700 overflow-visible">
+                class="bg-white dark:bg-gray-800 shadow-md rounded-lg border border-gray-200 dark:border-gray-700 overflow-visible mb-32">
 
                 <!-- Table Container -->
                 <div class="overflow-x-auto">
@@ -451,7 +536,7 @@ onUnmounted(() => {
                                         {{ truncateText(ticket.description, 60) }}
                                     </p>
                                     <button
-                                        v-if="(ticket.subject?.length || 0) > 40 || (ticket.description?.length || 0) > 60"
+                                        v-if="(ticket.subject?.length || 0) > 40 || (ticket.description?.length || 0) > 60 || getAttachmentUrls(ticket).length"
                                         @click="viewTicketDetails(ticket)"
                                         class="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium">
                                         View More
@@ -501,11 +586,26 @@ onUnmounted(() => {
                                         <span>⋮</span>
                                     </button>
 
-                                    <div v-if="isAdmin && openMenuId === ticket.id"
-                                        class="fixed w-52 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl shadow-xl z-[100] py-1.5 text-left divide-y divide-gray-100 dark:divide-gray-700"
+                                    <div v-if="isAdmin && openMenuId === ticket.id" ref="menuElement"
+                                        class="fixed w-52 max-h-[calc(100vh-1rem)] overflow-y-auto bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl shadow-xl z-[100] py-1.5 text-left divide-y divide-gray-100 dark:divide-gray-700"
                                         :style="{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }">
 
                                         <div v-if="isAdmin" class="py-1">
+                                            <div class="px-4 py-2 border-b border-gray-100 dark:border-gray-700">
+                                                <label
+                                                    class="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">
+                                                    Priority
+                                                </label>
+                                                <select
+                                                    :value="ticket.priority === 'Urgent' ? 'Critical' : ticket.priority"
+                                                    @change="updateTicketPriority(ticket, $event.target.value)"
+                                                    class="w-full bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                                    <option value="Low">Low</option>
+                                                    <option value="Medium">Medium</option>
+                                                    <option value="High">High</option>
+                                                    <option value="Critical">Critical</option>
+                                                </select>
+                                            </div>
                                             <button v-if="ticket.status === 'Resolved'"
                                                 @click="updateTicketStatus(ticket, 'Open'); openMenuId = null"
                                                 class="w-full px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-yellow-50 dark:hover:bg-gray-700 hover:text-yellow-600 dark:hover:text-yellow-400 flex items-center space-x-2.5 transition">
@@ -713,6 +813,16 @@ onUnmounted(() => {
                         class="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 p-4 rounded-lg whitespace-pre-wrap break-words">
                         {{ selectedTicketDetails?.description || 'No details provided.' }}
                     </p>
+                </div>
+                <div v-if="getAttachmentUrls(selectedTicketDetails).length">
+                    <p class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Screenshots</p>
+                    <div class="grid grid-cols-3 gap-2 mt-2">
+                        <a v-for="attachment in getAttachmentUrls(selectedTicketDetails)" :key="attachment"
+                            :href="getAttachmentUrl(attachment)" target="_blank" rel="noopener noreferrer">
+                            <img :src="getAttachmentUrl(attachment)" alt="Ticket screenshot"
+                                class="w-full h-24 object-cover rounded-lg border border-gray-200 dark:border-gray-700 hover:opacity-80 transition" />
+                        </a>
+                    </div>
                 </div>
             </div>
             <div class="flex justify-end mt-4">

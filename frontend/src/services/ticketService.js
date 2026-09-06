@@ -17,6 +17,23 @@ export const ticketService = {
     const response = await axios.post(API_URL, ticketData, getAuthHeaders());
     return response.data;
   },
+  async createTicketWithAttachments(ticketData, attachments = []) {
+    const formData = new FormData();
+    formData.append("subject", ticketData.subject);
+    formData.append("description", ticketData.description);
+    formData.append("priority", ticketData.priority);
+    formData.append("assetId", ticketData.assetId ?? "");
+
+    attachments.forEach((file) => formData.append("attachments", file));
+
+    const token = localStorage.getItem("token");
+    const response = await axios.post(`${API_URL}/with-attachments`, formData, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    return response.data;
+  },
   async updateTicket(id, ticketData) {
     const response = await axios.put(
       `${API_URL}/${id}`,

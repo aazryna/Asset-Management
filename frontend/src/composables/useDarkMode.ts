@@ -1,6 +1,5 @@
 export const useDarkMode = () => {
   const isDark = useState("isDark", () => {
-    // Cuba baca dari localStorage kalau ada, kalau tak default ke false (light mode)
     if (import.meta.client) {
       return localStorage.getItem("theme") === "dark";
     }
@@ -11,7 +10,6 @@ export const useDarkMode = () => {
     isDark.value = !isDark.value;
     if (import.meta.client) {
       localStorage.setItem("theme", isDark.value ? "dark" : "light");
-      // Masukkan atau buang class 'dark' kat tag <html> secara global
       if (isDark.value) {
         document.documentElement.classList.add("dark");
       } else {

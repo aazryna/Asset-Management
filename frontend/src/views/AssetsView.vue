@@ -14,6 +14,7 @@ const searchQuery = ref('')
 const statusFilter = ref('')
 const assignedUserFilter = ref('')
 const openMenuId = ref(null)
+const menuPosition = ref({ top: 0, left: 0 })
 const usersList = ref([])
 
 const successMessage = ref('')
@@ -69,7 +70,7 @@ const editingAsset = ref({
 const selectedFinalNotes = ref('')
 
 const currentUser = ref(JSON.parse(localStorage.getItem('user')) || {})
-const isAdmin = computed(() => currentUser.value.role === 'Admin')
+const isAdmin = computed(() => (currentUser.value.role ?? currentUser.value.Role) === 'Admin')
 
 const selectedAssetForTicket = ref(null)
 const maintenanceForm = ref({
@@ -79,7 +80,17 @@ const maintenanceForm = ref({
 })
 
 // Toggle Dropdown Menu
-const toggleMenu = (id) => {
+const toggleMenu = (id, event) => {
+    if (openMenuId.value === id) {
+        openMenuId.value = null
+        return
+    }
+
+    const buttonRect = event.currentTarget.getBoundingClientRect()
+    menuPosition.value = {
+        top: buttonRect.bottom + 4,
+        left: Math.max(8, buttonRect.right - 144)
+    }
     openMenuId.value = openMenuId.value === id ? null : id
 }
 
@@ -186,7 +197,7 @@ const createAsset = async () => {
             serialNumber: newAsset.value.serialNumber,
             userId: newAsset.value.userId ? Number(newAsset.value.userId) : null
         }
-        console.log("Payload hantar ke backend:", payload) // 
+        console.log("Payload send to backend:", payload)
         await assetService.createAsset(payload)
 
         newAsset.value = {
@@ -269,13 +280,13 @@ const openMaintenanceModal = (asset) => {
 const submitMaintenanceRequest = async (formData) => {
     submittingMaintenance.value = true
     try {
-        await ticketService.createTicket({
+        await ticketService.createTicketWithAttachments({
             subject: formData.subject,
             description: formData.description,
             priority: formData.priority,
             assetId: selectedAssetForTicket.value.id,
             status: 'Open'
-        })
+        }, formData.attachments)
 
         showMaintenanceModal.value = false
         showSuccess('Maintenance request submitted successfully! You can track it in the Tickets page.')
@@ -350,7 +361,7 @@ const handleFileUpload = async (event) => {
             alert('Successfully imported all assets from Excel!')
             await fetchAssets() // Refresh the asset list after import
         } catch (err) {
-            showError('Ralat semasa import Excel: ' + err.message)
+            showError('Error during Excel import: ' + err.message)
         } finally {
             loading.value = false
             // Reset the file input so the same file can be selected again if needed
@@ -370,7 +381,6 @@ const totalPages = computed(() => {
     return Math.ceil(filteredAssets.value.length / itemsPerPage.value)
 })
 
-// Label info (e.g., Showing 1 to 50 of 120 entries)
 const paginationStart = computed(() => {
     if (filteredAssets.value.length === 0) return 0
     return (currentPage.value - 1) * itemsPerPage.value + 1
@@ -546,7 +556,7 @@ const closeMenuOutside = (e) => {
                                 <th
                                     class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                                     Assigned User</th>
-                                <th v-if="isAdmin"
+                                <th
                                     class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                                     Actions</th>
                             </tr>
@@ -597,8 +607,7 @@ const closeMenuOutside = (e) => {
                                         Unassigned
                                     </span>
                                 </td>
-                                <td v-if="isAdmin"
-                                    class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
+                                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
                                     <div class="flex items-center justify-end gap-2">
                                         <button @click="openMaintenanceModal(asset)" title="Report Issue to IT"
                                             class="text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30 px-3 py-1.5 rounded-md text-xs font-medium transition inline-flex items-center gap-1 bg-orange-50/50 dark:bg-orange-950/30">
@@ -606,13 +615,15 @@ const closeMenuOutside = (e) => {
                                         </button>
 
                                         <div v-if="isAdmin" class="relative">
-                                            <button @click="toggleMenu(asset.id)"
-                                                class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 p-2 rounded-md transition inline-flex items-center justify-center">
+                                            <button v-if="isAdmin" @click="toggleMenu(asset.id, $event)"
+                                                aria-label="Open asset actions"
+                                                class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 min-h-10 min-w-10 p-2 rounded-md transition inline-flex items-center justify-center">
                                                 <span>⋮</span>
                                             </button>
 
-                                            <div v-if="openMenuId === asset.id"
-                                                class="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 py-1 text-left">
+                                            <div v-if="isAdmin && openMenuId === asset.id"
+                                                class="fixed w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-[100] py-1 text-left"
+                                                :style="{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }">
                                                 <button @click.stop="openEditModal(asset); openMenuId = null"
                                                     class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 block text-left">
                                                     ✏️ Edit Asset
@@ -628,8 +639,7 @@ const closeMenuOutside = (e) => {
                                 </td>
                             </tr>
                             <tr v-if="filteredAssets.length === 0">
-                                <td :colspan="isAdmin ? 7 : 6"
-                                    class="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                                <td colspan="7" class="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
                                     No asset records found.
                                 </td>
                             </tr>

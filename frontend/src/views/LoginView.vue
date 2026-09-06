@@ -37,7 +37,6 @@
                 </button>
             </form>
 
-            <!-- Bahagian pautan ke halaman Register -->
             <div class="text-center mt-4">
                 <p class="text-sm text-gray-600">
                     Don't have an account?

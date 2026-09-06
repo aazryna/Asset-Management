@@ -43,23 +43,71 @@ const toggleDarkMode = () => {
 
 let pollInterval = null;
 
+const getReadNotificationsKey = () => {
+  const userId = currentUser.value?.id ?? currentUser.value?.Id ?? currentUser.value?.email;
+  return userId ? `read-notifications-${userId}` : null;
+};
+
+const getReadNotificationIds = () => {
+  const key = getReadNotificationsKey();
+  if (!key) return [];
+
+  try {
+    return JSON.parse(localStorage.getItem(key) || '[]');
+  } catch {
+    return [];
+  }
+};
+
+const markNotificationRead = (notificationId) => {
+  const key = getReadNotificationsKey();
+  if (!key) return;
+
+  const readIds = new Set(getReadNotificationIds());
+  readIds.add(notificationId);
+  localStorage.setItem(key, JSON.stringify([...readIds]));
+  notifications.value = notifications.value.filter(notification => notification.id !== notificationId);
+  unreadCount.value = notifications.value.length;
+};
+
 const fetchNotifications = async () => {
-  if (!hasAdminAccess.value) return;
+  if (!currentUser.value) return;
   try {
     const token = authStore.token || localStorage.getItem('token');
-    const response = await axios.get('http://localhost:5090/api/tickets', {
+    const response = await axios.get('http://localhost:5090/api/notifications', {
       headers: { Authorization: `Bearer ${token}` }
     });
 
-    const allTickets = response.data;
-    notifications.value = [...allTickets].reverse().slice(0, 5);
-
-    const openTickets = allTickets.filter(ticket => ticket.status === 'Open');
-    unreadCount.value = openTickets.length;
+    const readIds = new Set(getReadNotificationIds());
+    notifications.value = response.data.filter(notification => !readIds.has(notification.id));
+    unreadCount.value = notifications.value.length;
   } catch (error) {
     console.error('Failed to fetch notifications', error);
   }
 };
+
+const stopNotificationPolling = () => {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+};
+
+const startNotificationPolling = () => {
+  stopNotificationPolling();
+  fetchNotifications();
+  pollInterval = setInterval(fetchNotifications, 15000);
+};
+
+watch(currentUser, (user) => {
+  if (user) {
+    startNotificationPolling();
+  } else {
+    stopNotificationPolling();
+    notifications.value = [];
+    unreadCount.value = 0;
+  }
+}, { immediate: true });
 
 const toggleDropdown = async () => {
   isDropdownOpen.value = !isDropdownOpen.value;
@@ -79,15 +127,11 @@ onMounted(() => {
     document.documentElement.classList.remove('dark');
   }
 
-  if (hasAdminAccess.value) {
-    fetchNotifications();
-    pollInterval = setInterval(fetchNotifications, 15000);
-  }
 });
 
 onUnmounted(() => {
   window.removeEventListener('click', closeDropdown);
-  if (pollInterval) clearInterval(pollInterval);
+  stopNotificationPolling();
 });
 
 const syncThemeState = () => {
@@ -205,27 +249,26 @@ const handleLogout = () => {
                 </div>
 
                 <!-- NOTIFICATIONS SECTION -->
-                <div v-if="hasAdminAccess" class="py-1 border-b border-gray-100 dark:border-gray-800">
+                <div class="py-1 border-b border-gray-100 dark:border-gray-800">
                   <div class="px-4 py-1.5 flex justify-between items-center">
-                    <span class="text-[10px] font-bold tracking-wider text-gray-400 dark:text-gray-500 uppercase">Live
-                      Tickets / Alerts</span>
+                    <span
+                      class="text-[10px] font-bold tracking-wider text-gray-400 dark:text-gray-500 uppercase">Notifications</span>
                   </div>
 
                   <div class="max-h-52 overflow-y-auto px-1 space-y-0.5">
                     <div v-if="notifications.length === 0" class="px-3 py-3 text-xs text-gray-400 text-center">
                       No new notifications.
                     </div>
-                    <router-link v-for="ticket in notifications" :key="ticket.id" to="/tickets"
-                      @click="isDropdownOpen = false"
+                    <router-link v-for="notification in notifications" :key="notification.id"
+                      :to="{ path: '/tickets', query: { ticketId: notification.ticketId } }"
+                      @click="markNotificationRead(notification.id); isDropdownOpen = false"
                       class="block px-3 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/70 transition">
                       <p
                         class="text-xs font-medium text-gray-800 dark:text-gray-200 truncate flex items-center gap-1.5">
                         <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                        {{ ticket.title || ticket.subject || 'New Ticket Created' }}
+                        {{ notification.action === 'CREATE_TICKET' ? 'New ticket received' : 'Ticket updated' }}
                       </p>
-                      <p class="text-[10px] text-gray-400 pl-3">
-                        By: {{ ticket.user?.name || 'Staff' }}
-                      </p>
+                      <p class="text-[10px] text-gray-400 pl-3 truncate">{{ notification.description }}</p>
                     </router-link>
                   </div>
                 </div>

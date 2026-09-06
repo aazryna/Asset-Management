@@ -29,7 +29,6 @@ const fetchLogs = async () => {
 
 const formatTimestamp = (timestamp) => {
     if (!timestamp) return '-'
-    // Pastikan string UTC dibaca betul dengan tambah 'Z' jika tiada offset
     const dateStr = timestamp.endsWith('Z') || timestamp.includes('+') ? timestamp : timestamp + 'Z'
     const date = new Date(dateStr)
 

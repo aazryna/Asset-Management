@@ -50,13 +50,26 @@ namespace AssetManagementApi.Controllers
                 return BadRequest();
             }
 
-            _context.Entry(user).State = EntityState.Modified;
+            var existingUser = await _context.Users.FindAsync(id);
+            if (existingUser == null)
+            {
+                return NotFound();
+            }
 
-            // Trace update data activity
+            existingUser.Name = user.Name;
+            existingUser.Email = user.Email;
+            existingUser.Role = user.Role;
+            existingUser.Status = user.Status;
+
+            if (!string.IsNullOrWhiteSpace(user.Password))
+            {
+                existingUser.Password = user.Password;
+            }
+
             _context.ActivityLogs.Add(new ActivityLog
             {
                 Action = "UPDATE",
-                Description = $"Updated user ID: {id} ({user.Name})"
+                Description = $"Updated user ID: {id} ({existingUser.Name})"
             });
 
             try
@@ -89,6 +102,34 @@ namespace AssetManagementApi.Controllers
         }
 
         user.Status = "Inactive";
+
+        var activeTickets = await _context.Tickets
+            .Where(ticket =>
+                (ticket.CreatedById == id || ticket.UserId == id ||
+                    (ticket.Asset != null && ticket.Asset.UserId == id)) &&
+                ticket.Status != "Resolved" &&
+                ticket.Status != "Closed" &&
+                ticket.Status != "Cancelled")
+            .ToListAsync();
+
+        foreach (var ticket in activeTickets)
+        {
+            ticket.Status = "Cancelled";
+            ticket.Resolution = "Cancelled because the assigned user is no longer available.";
+        }
+
+        var assignedAssets = await _context.Assets
+            .Where(asset => asset.UserId == id && !asset.IsDeleted)
+            .ToListAsync();
+
+        foreach (var asset in assignedAssets)
+        {
+            asset.UserId = null;
+            if (asset.Status != "Decommissioned")
+            {
+                asset.Status = "Available";
+            }
+        }
 
         // Trace delete activity
         _context.ActivityLogs.Add(new ActivityLog

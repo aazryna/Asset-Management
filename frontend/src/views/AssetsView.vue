@@ -11,11 +11,16 @@ const assets = ref([])
 const loading = ref(true)
 const error = ref(null)
 const searchQuery = ref('')
+const statusFilter = ref('')
+const assignedUserFilter = ref('')
 const openMenuId = ref(null)
 const usersList = ref([])
 
 const successMessage = ref('')
 const errorMessage = ref('')
+const showDeleteModal = ref(false)
+const deletingAssetId = ref(null)
+const deleteFinalNotes = ref('')
 
 // Pagination state
 const currentPage = ref(1)
@@ -38,6 +43,7 @@ const showError = (msg) => {
 const showModal = ref(false)
 const showEditModal = ref(false)
 const showMaintenanceModal = ref(false)
+const showFinalNotesModal = ref(false)
 const submitting = ref(false)
 const updating = ref(false)
 const submittingMaintenance = ref(false)
@@ -60,6 +66,7 @@ const editingAsset = ref({
     userId: null,
     userName: ''
 })
+const selectedFinalNotes = ref('')
 
 const currentUser = ref(JSON.parse(localStorage.getItem('user')) || {})
 const isAdmin = computed(() => currentUser.value.role === 'Admin')
@@ -91,7 +98,8 @@ const fetchAssets = async () => {
 
 const fetchUsersList = async () => {
     try {
-        usersList.value = await userService.getUsers()
+        const users = await userService.getUsers()
+        usersList.value = users.filter(user => (user.status ?? user.Status ?? 'Active') === 'Active')
     } catch (err) {
         console.error('Failed to retrieve staff list:', err)
     }
@@ -128,6 +136,20 @@ const myTicketsCount = computed(() => {
     }).length
 })
 
+const assignedUserOptions = computed(() => {
+    const options = new Map()
+    assets.value.forEach(asset => {
+        const ownerId = asset.userId ?? asset.UserId ?? asset.user?.id ?? asset.User?.id
+        const ownerName = asset.user?.name ?? asset.user?.Name ?? asset.user?.username ?? asset.user?.Username ??
+            asset.User?.name ?? asset.User?.Name ?? asset.User?.username ?? asset.User?.Username
+
+        if (ownerId != null && ownerName) {
+            options.set(String(ownerId), ownerName)
+        }
+    })
+    return [...options].map(([id, name]) => ({ id, name }))
+})
+
 const filteredAssets = computed(() => {
     return assets.value.filter(asset => {
         const query = searchQuery.value.toLowerCase()
@@ -138,12 +160,19 @@ const filteredAssets = computed(() => {
             ''
         ).toLowerCase()
 
+        const ownerId = asset.userId ?? asset.UserId ?? asset.user?.id ?? asset.User?.id
+        const matchesStatus = !statusFilter.value || asset.status === statusFilter.value
+        const matchesAssignedUser = assignedUserFilter.value === 'unassigned'
+            ? ownerId == null
+            : !assignedUserFilter.value || String(ownerId) === assignedUserFilter.value
+
         return (
             asset.name.toLowerCase().includes(query) ||
             asset.category.toLowerCase().includes(query) ||
             asset.serialNumber.toLowerCase().includes(query) ||
             ownerName.includes(query)
-        )
+        ) && matchesStatus && matchesAssignedUser
+
     })
 })
 
@@ -182,6 +211,11 @@ const openEditModal = (asset) => {
     showEditModal.value = true
 }
 
+const viewFinalNotes = (notes) => {
+    selectedFinalNotes.value = notes
+    showFinalNotesModal.value = true
+}
+
 //send PUT request to update asset
 const updateAsset = async () => {
     updating.value = true
@@ -198,11 +232,23 @@ const updateAsset = async () => {
 }
 
 // DELETE to delete asset
-const removeAsset = async (id) => {
-    if (!confirm('Are you sure you want to delete this asset?')) return
+const openDeletePrompt = (id) => {
+    deletingAssetId.value = id
+    deleteFinalNotes.value = ''
+    showDeleteModal.value = true
+}
+
+const deletingAsset = computed(() => assets.value.find(asset => asset.id === deletingAssetId.value))
+const deletingMaintenanceAsset = computed(() => deletingAsset.value?.status === 'Maintenance')
+
+const confirmDeleteAsset = async () => {
+    if (!deletingAssetId.value) return
     try {
-        await assetService.deleteAsset(id)
+        await assetService.deleteAsset(deletingAssetId.value, deleteFinalNotes.value)
         showSuccess('Asset successfully deleted!')
+        showDeleteModal.value = false
+        deletingAssetId.value = null
+        deleteFinalNotes.value = ''
         await fetchAssets()
     } catch (err) {
         showError('Error: ' + err.message)
@@ -345,7 +391,7 @@ watch(() => editingAsset.value.status, (newStatus, oldStatus) => {
     }
 })
 
-watch(searchQuery, () => {
+watch([searchQuery, statusFilter, assignedUserFilter], () => {
     currentPage.value = 1
 })
 
@@ -435,19 +481,38 @@ const closeMenuOutside = (e) => {
             </div>
 
             <!-- Search Bar & Action Buttons (Aligned) -->
-            <div class="mb-6 flex justify-between items-center">
+            <div class="mb-6 flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3">
                 <!-- Search Bar on the Left -->
-                <div class="w-full max-w-md">
+                <div class="w-full lg:max-w-md">
                     <input v-model="searchQuery" type="text" placeholder="Search by name, category, or serial number..."
                         class="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors" />
                 </div>
 
-                <!-- Import Excel Button on the Right -->
-                <div v-if="isAdmin">
-                    <button @click="exportToExcel"
-                        class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition inline-flex items-center gap-2">
-                        📊 Export Excel
-                    </button>
+                <div class="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                    <select v-model="statusFilter"
+                        class="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">All Statuses</option>
+                        <option value="Available">Available</option>
+                        <option value="In Use">In Use</option>
+                        <option value="Maintenance">Maintenance</option>
+                        <option value="Decommissioned">Decommissioned</option>
+                    </select>
+                    <select v-model="assignedUserFilter"
+                        class="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">All Assigned Users</option>
+                        <option value="unassigned">Unassigned</option>
+                        <option v-for="user in assignedUserOptions" :key="user.id" :value="user.id">
+                            {{ user.name }}
+                        </option>
+                    </select>
+
+                    <!-- Import Excel Button on the Right -->
+                    <div v-if="isAdmin">
+                        <button @click="exportToExcel"
+                            class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition inline-flex items-center gap-2">
+                            📊 Export Excel
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -481,7 +546,7 @@ const closeMenuOutside = (e) => {
                                 <th
                                     class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                                     Assigned User</th>
-                                <th
+                                <th v-if="isAdmin"
                                     class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                                     Actions</th>
                             </tr>
@@ -501,13 +566,20 @@ const closeMenuOutside = (e) => {
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{{
                                     asset.serialNumber }}</td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                    <span :class="{
-                                        'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300': asset.status === 'Available',
-                                        'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300': asset.status === 'In Use',
-                                        'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300': asset.status === 'Maintenance'
-                                    }" class="px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full">
-                                        {{ asset.status }}
-                                    </span>
+                                    <div class="flex flex-col items-center">
+                                        <span :class="{
+                                            'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300': asset.status === 'Available',
+                                            'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300': asset.status === 'In Use',
+                                            'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300': asset.status === 'Maintenance'
+                                        }"
+                                            class="px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full">
+                                            {{ asset.status }}
+                                        </span>
+                                        <button v-if="asset.finalNotes" @click="viewFinalNotes(asset.finalNotes)"
+                                            class="mt-1 text-center text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium">
+                                            [View More]
+                                        </button>
+                                    </div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
                                     <span v-if="asset.user || asset.User || asset.userId || asset.UserId">
@@ -525,7 +597,8 @@ const closeMenuOutside = (e) => {
                                         Unassigned
                                     </span>
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
+                                <td v-if="isAdmin"
+                                    class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
                                     <div class="flex items-center justify-end gap-2">
                                         <button @click="openMaintenanceModal(asset)" title="Report Issue to IT"
                                             class="text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30 px-3 py-1.5 rounded-md text-xs font-medium transition inline-flex items-center gap-1 bg-orange-50/50 dark:bg-orange-950/30">
@@ -544,7 +617,8 @@ const closeMenuOutside = (e) => {
                                                     class="w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 block text-left">
                                                     ✏️ Edit Asset
                                                 </button>
-                                                <button @click.stop="removeAsset(asset.id); openMenuId = null"
+                                                <button v-if="asset.status !== 'Decommissioned'"
+                                                    @click.stop="openDeletePrompt(asset.id); openMenuId = null"
                                                     class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 block text-left">
                                                     🗑️ Delete
                                                 </button>
@@ -554,7 +628,8 @@ const closeMenuOutside = (e) => {
                                 </td>
                             </tr>
                             <tr v-if="filteredAssets.length === 0">
-                                <td colspan="7" class="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                                <td :colspan="isAdmin ? 7 : 6"
+                                    class="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
                                     No asset records found.
                                 </td>
                             </tr>
@@ -652,6 +727,7 @@ const closeMenuOutside = (e) => {
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Asset
                                 Name</label>
                             <input v-model="editingAsset.name" type="text" required
+                                :disabled="editingAsset.status === 'Decommissioned'"
                                 class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                         </div>
 
@@ -659,6 +735,7 @@ const closeMenuOutside = (e) => {
                             <label
                                 class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category</label>
                             <input v-model="editingAsset.category" type="text" required
+                                :disabled="editingAsset.status === 'Decommissioned'"
                                 class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                         </div>
 
@@ -666,19 +743,28 @@ const closeMenuOutside = (e) => {
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Serial
                                 Number</label>
                             <input v-model="editingAsset.serialNumber" type="text" required
+                                :disabled="editingAsset.status === 'Decommissioned'"
                                 class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                         </div>
 
                         <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Assign to
                                 Staff</label>
-                            <select v-model="editingAsset.userId"
+                            <select v-model="editingAsset.userId" :disabled="editingAsset.status === 'Decommissioned'"
                                 class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <option :value="null">-- Unassigned (Available) --</option>
                                 <option v-for="user in usersList" :key="user.id" :value="user.id">
                                     {{ user.name || user.username }} ({{ user.role }})
                                 </option>
                             </select>
+                        </div>
+
+                        <div v-if="editingAsset.status === 'Decommissioned'">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Final
+                                Notes</label>
+                            <textarea v-model="editingAsset.finalNotes" rows="4"
+                                placeholder="Enter the reason for decommissioning..."
+                                class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
                         </div>
 
 
@@ -696,6 +782,58 @@ const closeMenuOutside = (e) => {
 
             <MaintenanceModal v-model="showMaintenanceModal" :asset="selectedAssetForTicket"
                 :submitting="submittingMaintenance" @submit="submitMaintenanceRequest" />
+
+            <div v-if="showFinalNotesModal"
+                class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                <div
+                    class="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6 shadow-xl border border-gray-200 dark:border-gray-700">
+                    <h2 class="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4">Final Notes</h2>
+                    <p
+                        class="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 p-4 rounded-lg mb-4 whitespace-pre-wrap break-words">
+                        {{ selectedFinalNotes }}
+                    </p>
+                    <div class="flex justify-end">
+                        <button @click="showFinalNotesModal = false"
+                            class="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow transition">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Confirm Delete Asset -->
+            <div v-if="showDeleteModal"
+                class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                <div
+                    class="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6 shadow-xl border border-gray-200 dark:border-gray-700">
+                    <h2 class="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2">Decommission Asset</h2>
+                    <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                        Are you sure you want to decommission this asset? This action cannot be undone.
+                    </p>
+                    <div v-if="deletingMaintenanceAsset" class="mb-6">
+                        <p class="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                            This asset has an active maintenance ticket. Add final notes before decommissioning.
+                        </p>
+                        <textarea v-model="deleteFinalNotes" rows="4" required placeholder="Enter the final notes..."
+                            class="w-full bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"></textarea>
+                    </div>
+                    <p v-else class="text-sm text-gray-600 dark:text-gray-300 mb-6">
+                        The asset will be marked as Decommissioned.
+                    </p>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button"
+                            @click="showDeleteModal = false; deletingAssetId = null; deleteFinalNotes = ''"
+                            class="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
+                            Cancel
+                        </button>
+                        <button type="button" @click="confirmDeleteAsset"
+                            :disabled="deletingMaintenanceAsset && !deleteFinalNotes.trim()"
+                            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow transition">
+                            Decommission
+                        </button>
+                    </div>
+                </div>
+            </div>
 
 
         </div>

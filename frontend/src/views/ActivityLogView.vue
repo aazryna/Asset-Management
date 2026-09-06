@@ -1,14 +1,25 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 
 const logs = ref([])
 const loading = ref(true)
+const currentPage = ref(1)
+const pageSize = 50
+
+const totalPages = computed(() => Math.ceil(logs.value.length / pageSize))
+const paginatedLogs = computed(() => {
+    const start = (currentPage.value - 1) * pageSize
+    return logs.value.slice(start, start + pageSize)
+})
+const paginationStart = computed(() => logs.value.length === 0 ? 0 : (currentPage.value - 1) * pageSize + 1)
+const paginationEnd = computed(() => Math.min(currentPage.value * pageSize, logs.value.length))
 
 const fetchLogs = async () => {
     try {
         const response = await axios.get('http://localhost:5090/api/activity-logs')
         logs.value = response.data
+        currentPage.value = 1
     } catch (error) {
         console.error('Failed to fetch activity logs:', error)
     } finally {
@@ -79,7 +90,7 @@ onMounted(() => {
                         </tr>
                     </thead>
                     <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        <tr v-for="log in logs" :key="log.id"
+                        <tr v-for="log in paginatedLogs" :key="log.id"
                             class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold">
                                 <span :class="{
@@ -97,6 +108,26 @@ onMounted(() => {
                         </tr>
                     </tbody>
                 </table>
+
+                <div v-if="logs.length > 0"
+                    class="px-6 py-4 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <span class="text-sm text-gray-600 dark:text-gray-400">
+                        Showing {{ paginationStart }} to {{ paginationEnd }} of {{ logs.length }} entries
+                    </span>
+                    <div class="flex items-center space-x-2">
+                        <button @click="currentPage--" :disabled="currentPage === 1"
+                            class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                            Previous
+                        </button>
+                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Page {{ currentPage }} of {{ totalPages || 1 }}
+                        </span>
+                        <button @click="currentPage++" :disabled="currentPage >= totalPages"
+                            class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                            Next
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -24,19 +24,20 @@ namespace AssetManagementApi.Controllers
         public async Task<ActionResult<IEnumerable<Ticket>>> GetTickets()
         {
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+            var userRole = User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
 
             IQueryable<Ticket> query = _context.Tickets
                 .Include(t => t.Asset)
                     .ThenInclude(a => a.User) 
                 .Include(t => t.User)
-                .Include(t => t.CreatedBy);
+                .Include(t => t.CreatedBy)
+                .Include(t => t.ResolutionHistory.OrderByDescending(history => history.CreatedAt));
 
             if (userRole != "Admin")
         {
                 if (int.TryParse(userIdClaim, out int parsedUserId))
             {
-                query = query.Where(t => t.CreatedById == parsedUserId || t.UserId == parsedUserId || t.Asset.UserId == parsedUserId);
+                query = query.Where(t => t.CreatedById == parsedUserId || t.UserId == parsedUserId || (t.Asset != null && t.Asset.UserId == parsedUserId));
             }
                 else
             {
@@ -125,6 +126,16 @@ namespace AssetManagementApi.Controllers
 
             existingTicket.Status = ticket.Status;
             existingTicket.Resolution = ticket.Resolution;
+
+            if (ticket.Status == "Resolved" && !string.IsNullOrWhiteSpace(ticket.Resolution))
+            {
+                _context.ResolutionHistories.Add(new ResolutionHistory
+                {
+                    TicketId = existingTicket.Id,
+                    Feedback = ticket.Resolution,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
             try
             {

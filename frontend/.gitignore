@@ -35,3 +35,9 @@ obj/
 *.db
 *.db-shm
 *.db-wal
+
+bin/
+obj/
+.vs/
+frontend/node_modules/
+frontend/dist/

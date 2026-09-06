@@ -88,7 +88,7 @@ namespace AssetManagementApi.Controllers
             return NotFound();
         }
 
-        _context.Users.Remove(user);
+        user.Status = "Inactive";
 
         // Trace delete activity
         _context.ActivityLogs.Add(new ActivityLog

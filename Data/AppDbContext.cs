@@ -11,5 +11,6 @@ namespace AssetManagementApi.Data
         public DbSet<Asset> Assets { get; set; }
         public DbSet<ActivityLog> ActivityLogs { get; set; }
         public DbSet<Ticket> Tickets { get; set; }
+        public DbSet<ResolutionHistory> ResolutionHistories { get; set; }
     }
 }

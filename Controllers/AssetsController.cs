@@ -54,7 +54,28 @@ namespace AssetManagementApi.Controllers
                 );
             }
 
-            return await query.OrderByDescending(a => a.Id).ToListAsync(); 
+            var assets = await query.OrderByDescending(a => a.Id).ToListAsync();
+            var assetsChanged = false;
+
+            foreach (var asset in assets)
+            {
+                if (asset.User != null && asset.User.Status != "Active")
+                {
+                    asset.UserId = null;
+                    if (asset.Status == "In Use")
+                    {
+                        asset.Status = "Available";
+                    }
+                    assetsChanged = true;
+                }
+            }
+
+            if (assetsChanged)
+            {
+                await _context.SaveChangesAsync();
+            }
+
+            return assets;
         }
 
         [HttpGet("{id}")]
@@ -67,6 +88,16 @@ namespace AssetManagementApi.Controllers
             if (asset == null)
             {
                 return NotFound(new {message = "Asset not found" });
+            }
+
+            if (asset.User != null && asset.User.Status != "Active")
+            {
+                asset.UserId = null;
+                if (asset.Status == "In Use")
+                {
+                    asset.Status = "Available";
+                }
+                await _context.SaveChangesAsync();
             }
 
             return asset;
@@ -108,9 +139,20 @@ namespace AssetManagementApi.Controllers
                 return NotFound(new { message = "Asset not found" });
             }
 
+            if (existingAsset.Status == "Decommissioned" ||
+                !string.IsNullOrWhiteSpace(assetDto.FinalNotes) ||
+                assetDto.Status == "Decommissioned")
+            {
+                existingAsset.FinalNotes = assetDto.FinalNotes;
+                existingAsset.Status = "Decommissioned";
+                await _context.SaveChangesAsync();
+                return NoContent();
+            }
+
             existingAsset.Name = assetDto.Name;
             existingAsset.serialNumber = assetDto.serialNumber;
             existingAsset.Category = assetDto.Category;
+            existingAsset.FinalNotes = assetDto.FinalNotes;
     
             // Handle unassigned user
             if (assetDto.UserId == 0 || assetDto.UserId == null)
@@ -120,6 +162,15 @@ namespace AssetManagementApi.Controllers
             else
             {
                 existingAsset.UserId = assetDto.UserId;
+            }
+
+            if (existingAsset.UserId.HasValue)
+            {
+                var assignedUser = await _context.Users.FindAsync(existingAsset.UserId.Value);
+                if (assignedUser == null || assignedUser.Status != "Active")
+                {
+                    existingAsset.UserId = null;
+                }
             }
 
             // 3. Logic auto-status ikut arahan hang
@@ -158,7 +209,7 @@ namespace AssetManagementApi.Controllers
         //DELETE: api/Assets5 (Delete asset)[cite: 1]
         [HttpDelete("{id}")]
         [Authorize]
-        public async Task<IActionResult> DeleteAsset(int id)
+        public async Task<IActionResult> DeleteAsset(int id, [FromBody] DeleteAssetRequest? request)
         {
             var asset = await _context.Assets.FindAsync(id);
 
@@ -169,6 +220,25 @@ namespace AssetManagementApi.Controllers
 
             asset.IsDeleted = true;
             asset.Status = "Decommissioned";
+
+            if (!string.IsNullOrWhiteSpace(request?.FinalNotes))
+            {
+                asset.FinalNotes = request.FinalNotes;
+            }
+
+            var maintenanceTickets = await _context.Tickets
+                .Where(ticket => ticket.AssetId == id &&
+                    ticket.Status != "Resolved" &&
+                    ticket.Status != "Closed" &&
+                    ticket.Status != "Cancelled")
+                .ToListAsync();
+
+            foreach (var ticket in maintenanceTickets)
+            {
+                ticket.Status = "Cancelled";
+                ticket.Resolution = "Cancelled because asset was decommissioned.";
+            }
+
             await _context.SaveChangesAsync();
 
             return NoContent();

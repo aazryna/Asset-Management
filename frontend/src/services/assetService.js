@@ -42,10 +42,11 @@ export const assetService = {
     return text ? JSON.parse(text) : true;
   },
 
-  async deleteAsset(id) {
+  async deleteAsset(id, finalNotes = "") {
     const response = await fetch(`${API_BASE_URL}/${id}`, {
       method: "DELETE",
       headers: getAuthHeaders(),
+      body: JSON.stringify({ finalNotes }),
     });
     if (!response.ok) throw new Error("Failed to delete asset.");
     return true;

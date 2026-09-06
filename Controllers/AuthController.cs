@@ -38,6 +38,11 @@ namespace AssetManagementApi.Controllers
                 return Unauthorized(new { message = "Invalid email or password." });
             }
 
+            if (user.Status != "Active")
+            {
+                return Unauthorized(new { message = "This user account is inactive." });
+            }
+
             // Generate JWT token
             var jwtKey = _configuration["Jwt:Key"] ?? "DefaultSecretKeyHerePleaseChangeIt";
             var keyBytes = Encoding.ASCII.GetBytes(jwtKey);

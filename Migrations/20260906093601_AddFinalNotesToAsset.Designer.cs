@@ -3,6 +3,7 @@ using System;
 using AssetManagementApi.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AssetManagementApi.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260906093601_AddFinalNotesToAsset")]
+    partial class AddFinalNotesToAsset
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -84,31 +87,6 @@ namespace AssetManagementApi.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("Assets");
-                });
-
-            modelBuilder.Entity("AssetManagementApi.Models.ResolutionHistory", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Feedback")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("TicketId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TicketId");
-
-                    b.ToTable("ResolutionHistories");
                 });
 
             modelBuilder.Entity("AssetManagementApi.Models.Ticket", b =>
@@ -208,17 +186,6 @@ namespace AssetManagementApi.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("AssetManagementApi.Models.ResolutionHistory", b =>
-                {
-                    b.HasOne("AssetManagementApi.Models.Ticket", "Ticket")
-                        .WithMany("ResolutionHistory")
-                        .HasForeignKey("TicketId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Ticket");
-                });
-
             modelBuilder.Entity("AssetManagementApi.Models.Ticket", b =>
                 {
                     b.HasOne("AssetManagementApi.Models.Asset", "Asset")
@@ -238,11 +205,6 @@ namespace AssetManagementApi.Migrations
                     b.Navigation("CreatedBy");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("AssetManagementApi.Models.Ticket", b =>
-                {
-                    b.Navigation("ResolutionHistory");
                 });
 #pragma warning restore 612, 618
         }

@@ -22,7 +22,6 @@ namespace AssetManagementApi.Controllers
         {
             return await _context.ActivityLogs
                 .OrderByDescending(l => l.Timestamp)
-                .Take(50)
                 .ToListAsync();
         }
     }

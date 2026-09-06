@@ -2,12 +2,16 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as XLSX from 'xlsx'
 import { userService } from '../services/userService'
+import { activityLogService } from '../services/activityLogService'
 
 // State management
 const users = ref([])
 const loading = ref(true)
 const error = ref(null)
+const deleteHistory = ref([])
 const searchQuery = ref('')
+const statusFilter = ref('')
+const roleFilter = ref('')
 const openMenuId = ref(null)
 
 // Modal states
@@ -17,6 +21,8 @@ const updating = ref(false)
 // Pagination state
 const currentPage = ref(1)
 const pageSize = ref(10)
+const deleteHistoryPage = ref(1)
+const deleteHistoryPageSize = ref(10)
 
 // State for edit modal
 const editingUser = ref({
@@ -47,6 +53,20 @@ const fetchUsers = async () => {
     }
 }
 
+const fetchDeleteHistory = async () => {
+    try {
+        const logs = await activityLogService.getActivityLogs()
+        deleteHistory.value = logs.filter(log =>
+            log.action === 'DELETE' && log.description?.startsWith('Deleted user:')
+        )
+        deleteHistoryPage.value = 1
+    } catch (err) {
+        console.error('Fetch user delete history error:', err)
+    }
+}
+
+const formatTimestamp = (timestamp) => new Date(timestamp).toLocaleString()
+
 
 // Update User Action
 const updateUser = async () => {
@@ -70,12 +90,15 @@ const filteredUsers = computed(() => {
         const name = (user.name ?? user.Name ?? user.username ?? user.Username)?.toLowerCase() || ''
         const email = (user.email ?? user.Email)?.toLowerCase() || ''
         const role = (user.role ?? user.Role)?.toLowerCase() || ''
+        const status = user.status ?? user.Status ?? 'Active'
 
         return (
             name.includes(query) ||
             email.includes(query) ||
             role.includes(query)
-        )
+        ) &&
+            (!statusFilter.value || status === statusFilter.value) &&
+            (!roleFilter.value || (user.role ?? user.Role) === roleFilter.value)
     })
 })
 
@@ -98,8 +121,27 @@ const paginationEnd = computed(() => {
     return end > filteredUsers.value.length ? filteredUsers.value.length : end
 })
 
+const deleteHistoryTotalPages = computed(() =>
+    Math.ceil(deleteHistory.value.length / deleteHistoryPageSize.value)
+)
+
+const paginatedDeleteHistory = computed(() => {
+    const start = (deleteHistoryPage.value - 1) * deleteHistoryPageSize.value
+    return deleteHistory.value.slice(start, start + deleteHistoryPageSize.value)
+})
+
+const deleteHistoryPaginationStart = computed(() => {
+    if (deleteHistory.value.length === 0) return 0
+    return (deleteHistoryPage.value - 1) * deleteHistoryPageSize.value + 1
+})
+
+const deleteHistoryPaginationEnd = computed(() => Math.min(
+    deleteHistoryPage.value * deleteHistoryPageSize.value,
+    deleteHistory.value.length
+))
+
 // Reset to page 1 on search change
-watch(searchQuery, () => {
+watch([searchQuery, statusFilter, roleFilter], () => {
     currentPage.value = 1
 })
 
@@ -121,7 +163,7 @@ const removeUser = async (id) => {
     if (!confirm('Are you sure you want to delete this user?')) return
     try {
         await userService.deleteUser(id)
-        await fetchUsers()
+        await Promise.all([fetchUsers(), fetchDeleteHistory()])
     } catch (err) {
         alert('Error: ' + err.message)
     }
@@ -154,6 +196,7 @@ const closeMenuOutside = (e) => {
 
 onMounted(() => {
     fetchUsers()
+    fetchDeleteHistory()
     window.addEventListener('click', closeMenuOutside)
 })
 
@@ -175,13 +218,25 @@ onUnmounted(() => {
             </header>
 
             <!-- Search Bar & Export Button -->
-            <div class="mb-6 flex justify-between items-center">
-                <div class="w-full max-w-md">
+            <div class="mb-6 flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3">
+                <div class="w-full lg:max-w-md">
                     <input v-model="searchQuery" type="text" placeholder="Search by name, email, or role..."
                         class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm placeholder-gray-400 dark:placeholder-gray-500" />
                 </div>
 
-                <div>
+                <div class="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                    <select v-model="statusFilter"
+                        class="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">All Statuses</option>
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                    </select>
+                    <select v-model="roleFilter"
+                        class="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">All Roles</option>
+                        <option value="Admin">Admin</option>
+                        <option value="Staff">Staff</option>
+                    </select>
                     <button @click="exportUsersToExcel"
                         class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition inline-flex items-center gap-2">
                         📊 Export Users
@@ -220,7 +275,7 @@ onUnmounted(() => {
                         </tr>
                     </thead>
                     <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        <tr v-for="user in filteredUsers" :key="user.id ?? user.Id"
+                        <tr v-for="user in paginatedUsers" :key="user.id ?? user.Id"
                             class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{ user.id
                                 ??
@@ -292,6 +347,69 @@ onUnmounted(() => {
                     </button>
                 </div>
             </div>
+            <!-- User Delete Audit Trail -->
+            <div v-if="filteredUsers.length > 0"
+                class="mt-8 bg-white dark:bg-gray-800 shadow-md rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <h2 class="text-lg font-bold text-gray-800 dark:text-gray-100">User Delete History</h2>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Audit trail for deleted user accounts.</p>
+                </div>
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700 table-fixed">
+                    <thead class="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                            <th
+                                class="w-1/4 px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                Deleted User</th>
+                            <th
+                                class="w-1/4 px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                Timestamp</th>
+                            <th
+                                class="w-2/4 px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                Audit Details</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        <tr v-for="log in paginatedDeleteHistory" :key="log.id"
+                            class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200 truncate">
+                                {{ log.description?.replace('Deleted user: ', '').split(' (Email:')[0] }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300 truncate">
+                                {{ formatTimestamp(log.timestamp) }}
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-300 truncate">
+                                {{ log.description }}
+                            </td>
+                        </tr>
+                        <tr v-if="deleteHistory.length === 0">
+                            <td colspan="3" class="px-6 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                                No deleted user records found.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div v-if="deleteHistory.length > 0"
+                    class="px-6 py-4 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <span class="text-sm text-gray-600 dark:text-gray-400">
+                        Showing {{ deleteHistoryPaginationStart }} to {{ deleteHistoryPaginationEnd }} of {{
+                            deleteHistory.length }} entries
+                    </span>
+                    <div class="flex items-center space-x-2">
+                        <button @click="deleteHistoryPage--" :disabled="deleteHistoryPage === 1"
+                            class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                            Previous
+                        </button>
+                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Page {{ deleteHistoryPage }} of {{ deleteHistoryTotalPages || 1 }}
+                        </span>
+                        <button @click="deleteHistoryPage++" :disabled="deleteHistoryPage >= deleteHistoryTotalPages"
+                            class="px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition">
+                            Next
+                        </button>
+                    </div>
+                </div>
+            </div>
+
         </div>
 
 

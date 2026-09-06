@@ -41,6 +41,8 @@ const toggleDarkMode = () => {
   }
 };
 
+let pollInterval = null;
+
 const fetchNotifications = async () => {
   if (!hasAdminAccess.value) return;
   try {
@@ -48,25 +50,21 @@ const fetchNotifications = async () => {
     const response = await axios.get('http://localhost:5090/api/tickets', {
       headers: { Authorization: `Bearer ${token}` }
     });
+
     const allTickets = response.data;
-    notifications.value = allTickets.slice(-5).reverse();
-    const lastReadTicketId = parseInt(localStorage.getItem('lastReadTicketId') || '0');
-    const unreadItems = allTickets.filter(ticket => ticket.id > lastReadTicketId);
-    unreadCount.value = unreadItems.length;
+    notifications.value = [...allTickets].reverse().slice(0, 5);
+
+    const openTickets = allTickets.filter(ticket => ticket.status === 'Open');
+    unreadCount.value = openTickets.length;
   } catch (error) {
     console.error('Failed to fetch notifications', error);
   }
 };
 
-const toggleDropdown = () => {
+const toggleDropdown = async () => {
   isDropdownOpen.value = !isDropdownOpen.value;
   if (isDropdownOpen.value) {
-    fetchNotifications();
-    if (notifications.value.length > 0) {
-      const latestTicketId = notifications.value[0].id;
-      localStorage.setItem('lastReadTicketId', latestTicketId);
-      unreadCount.value = 0;
-    }
+    await fetchNotifications();
   }
 };
 
@@ -80,9 +78,16 @@ onMounted(() => {
     isDarkMode.value = false;
     document.documentElement.classList.remove('dark');
   }
+
   if (hasAdminAccess.value) {
     fetchNotifications();
+    pollInterval = setInterval(fetchNotifications, 15000);
   }
+});
+
+onUnmounted(() => {
+  window.removeEventListener('click', closeDropdown);
+  if (pollInterval) clearInterval(pollInterval);
 });
 
 const syncThemeState = () => {
@@ -91,10 +96,7 @@ const syncThemeState = () => {
 
 watch(() => route.path, () => { syncThemeState(); });
 
-onUnmounted(() => {
-  window.removeEventListener('click', closeDropdown);
-  syncThemeState();
-});
+
 
 const handleLogout = () => {
   authStore.logout();

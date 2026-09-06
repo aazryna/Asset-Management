@@ -16,6 +16,8 @@ namespace AssetManagementApi.Models
 
         public string? Resolution { get; set; }
 
+        public ICollection<ResolutionHistory> ResolutionHistory { get; set; } = new List<ResolutionHistory>();
+
         // Status: Open, In Progress, Resolved, Closed
         public string Status { get; set; } = "Open";
 
